@@ -1,0 +1,12 @@
+<resources>
+    <string name="app_name">rareBit</string>
+    <string name="find_devices">Find Devices</string>
+    <string name="stop_scanning">Stop Scanning</string>
+    <string name="label_connected">CONNECTED</string>
+    <string name="label_update">UPDATE!</string>
+    <string name="label_read">READ</string>
+    <string name="label_write">WRITE</string>
+    <string name="label_notify">NOTIFY</string>
+    <string name="write_btn">Write</string>
+    <string name="no_value">--</string>
+</resources>

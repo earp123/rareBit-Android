@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="100dp"
+    android:height="100dp"
+    android:viewportWidth="100"
+    android:viewportHeight="100">
+
+    <!-- Isometric cube: top face (brightest white) -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M50,10 L82,28.5 L50,47 L18,28.5 Z" />
+
+    <!-- Left face (medium grey) -->
+    <path
+        android:fillColor="#B0B0B0"
+        android:pathData="M18,28.5 L50,47 L50,84 L18,65.5 Z" />
+
+    <!-- Right face (darker grey) -->
+    <path
+        android:fillColor="#787878"
+        android:pathData="M82,28.5 L82,65.5 L50,84 L50,47 Z" />
+
+    <!-- Outline strokes for crisp edges -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="0.8"
+        android:fillColor="#00000000"
+        android:pathData="M50,10 L82,28.5 L82,65.5 L50,84 L18,65.5 L18,28.5 Z" />
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="0.5"
+        android:fillColor="#00000000"
+        android:pathData="M50,47 L50,84 M50,47 L18,28.5 M50,47 L82,28.5" />
+</vector>

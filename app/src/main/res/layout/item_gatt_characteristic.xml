@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:paddingStart="24dp"
+    android:paddingEnd="16dp"
+    android:paddingTop="8dp"
+    android:paddingBottom="8dp"
+    android:background="#FF111111">
+
+    <!-- UUID / name -->
+    <TextView
+        android:id="@+id/charName"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textColor="#FFB0B0B0"
+        android:textSize="12sp"
+        android:ellipsize="end"
+        android:maxLines="1" />
+
+    <!-- Property chips row -->
+    <LinearLayout
+        android:id="@+id/chipsRow"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/chipRead"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="4dp"
+            android:background="@drawable/bg_badge"
+            android:paddingHorizontal="6dp"
+            android:paddingVertical="2dp"
+            android:text="@string/label_read"
+            android:textAllCaps="true"
+            android:textColor="@color/white"
+            android:textSize="9sp"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/chipWrite"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="4dp"
+            android:background="@drawable/bg_badge"
+            android:paddingHorizontal="6dp"
+            android:paddingVertical="2dp"
+            android:text="@string/label_write"
+            android:textAllCaps="true"
+            android:textColor="@color/white"
+            android:textSize="9sp"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/chipNotify"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_badge"
+            android:paddingHorizontal="6dp"
+            android:paddingVertical="2dp"
+            android:text="@string/label_notify"
+            android:textAllCaps="true"
+            android:textColor="#FF00CFFF"
+            android:textSize="9sp"
+            android:visibility="gone" />
+
+    </LinearLayout>
+
+    <!-- Value (hex + ASCII) -->
+    <TextView
+        android:id="@+id/charValue"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:fontFamily="monospace"
+        android:textColor="@color/white"
+        android:textSize="12sp"
+        android:text="@string/no_value" />
+
+    <!-- Write input row -->
+    <LinearLayout
+        android:id="@+id/writeRow"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:orientation="horizontal"
+        android:visibility="gone">
+
+        <EditText
+            android:id="@+id/writeInput"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginEnd="8dp"
+            android:hint="hex bytes (e.g. 01 FF)"
+            android:textColorHint="#FF555555"
+            android:textColor="@color/white"
+            android:backgroundTint="@color/white"
+            android:textSize="12sp"
+            android:inputType="text"
+            android:singleLine="true" />
+
+        <Button
+            android:id="@+id/writeButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/write_btn"
+            android:textSize="12sp"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:backgroundTint="@color/white"
+            android:textColor="@color/black" />
+
+    </LinearLayout>
+
+</LinearLayout>
