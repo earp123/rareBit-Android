@@ -84,10 +84,11 @@
             <!-- Device type icon (connected state only) -->
             <ImageView
                 android:id="@+id/deviceTypeIcon"
-                android:layout_width="34dp"
-                android:layout_height="34dp"
+                android:layout_width="102dp"
+                android:layout_height="102dp"
                 android:layout_marginEnd="14dp"
                 android:src="@drawable/ic_device_unknown"
+                android:scaleType="fitCenter"
                 android:contentDescription="@null"
                 android:visibility="gone"
                 app:layout_constraintBottom_toTopOf="@id/rssiBar"

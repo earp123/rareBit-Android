@@ -36,9 +36,19 @@ android {
         buildConfig = true
     }
 
+    signingConfigs {
+        create("release") {
+            storeFile = rootProject.file("rarebit-release.jks")
+            storePassword = localProps.getProperty("keystore.store.password")
+            keyAlias = localProps.getProperty("keystore.key.alias", "rarebit")
+            keyPassword = localProps.getProperty("keystore.key.password")
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

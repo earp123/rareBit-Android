@@ -4,12 +4,14 @@ import android.Manifest
 import android.bluetooth.BluetoothAdapter
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.PopupMenu
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
@@ -50,6 +52,11 @@ class ScanListFragment : Fragment() {
         bleManager.clearDisconnectedDevices()
     }
 
+    override fun onPause() {
+        super.onPause()
+        bleManager.stopScan()
+    }
+
     override fun onCreateView(
         inflater: LayoutInflater,
         container: ViewGroup?,
@@ -61,6 +68,32 @@ class ScanListFragment : Fragment() {
 
         recyclerView = view.findViewById(R.id.recyclerView)
         scanButton = view.findViewById(R.id.scanButton)
+        val optionsButton: Button = view.findViewById(R.id.optionsButton)
+        optionsButton.setOnClickListener { anchor ->
+            val menu = PopupMenu(requireContext(), anchor)
+            menu.menu.apply {
+                add(0, 1, 0, "rareBit Official")
+                add(0, 2, 1, "User Manual")
+                add(0, 3, 2, "Smartwatch")
+                addSubMenu(0, 4, 3, "Buy PRO Sets").apply {
+                    add(0, 41, 0, "The Top Ref")
+                    add(0, 42, 1, "RefsNeedLoveToo")
+                }
+                add(0, 5, 4, "Support")
+            }
+            menu.setOnMenuItemClickListener { item ->
+                when (item.itemId) {
+                    1  -> startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.rarebitofficial.com")))
+                    2  -> startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.rarebitofficial.com/order")))
+                    3  -> { /* coming soon */ }
+                    41 -> startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://thetopref.com/collections/beep-flags/products/rarebit-beep-flags")))
+                    42 -> startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://refsneedlovetoo.com/collections/referee-gear/products/next-generation-buzzer-flags-rarebit-pro-set")))
+                    5  -> startActivity(Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:reply@rarebit.biz")))
+                }
+                true
+            }
+            menu.show()
+        }
 
         adapter = DeviceCardAdapter { device -> navigateToDetail(device) }
 
@@ -69,12 +102,14 @@ class ScanListFragment : Fragment() {
         recyclerView.clipChildren = false
         recyclerView.clipToPadding = false
 
+        // Seed adapter immediately so there's no empty-list flash on navigate-back
+        adapter.submitList(bleManager.devices.value)
+
         scanButton.setOnClickListener {
             if (bleManager.isScanning.value) {
                 bleManager.stopScan()
             } else {
-                bleManager.clearDisconnectedDevices()
-                checkBluetoothAndScan()
+                refreshScan()
             }
         }
 
@@ -92,6 +127,11 @@ class ScanListFragment : Fragment() {
                     getString(R.string.find_devices)
             }
         }
+    }
+
+    private fun refreshScan() {
+        bleManager.clearDisconnectedDevices()
+        checkBluetoothAndScan()
     }
 
     private fun checkBluetoothAndScan() {
