@@ -2,7 +2,7 @@ package com.example.rarebit.ble
 
 import android.bluetooth.BluetoothDevice
 
-enum class DeviceType { FLAG, RECEIVER, UNKNOWN }
+enum class DeviceType { FLAG, RECEIVER, RELAY, UNKNOWN }
 
 enum class GlowState { GREEN, CYAN, BLUE, YELLOW, RED }
 
@@ -22,15 +22,18 @@ data class BleDevice(
 ) {
     val address: String get() = bluetoothDevice.address
 
+    // Battery-only glow, matching iOS: full=Green, high=Cyan, mid=Blue, low=Red,
+    // unknown=Yellow. Updates are shown as a badge, never as the glow color.
     val glowState: GlowState
         get() = when {
-            hasUpdate         -> GlowState.YELLOW
             configInterval == 0 -> GlowState.RED
             configInterval == 1 -> GlowState.BLUE
             configInterval == 2 -> GlowState.CYAN
             configInterval == 3 -> GlowState.GREEN
-            batteryLevel in 0..20  -> GlowState.RED
-            batteryLevel in 21..60 -> GlowState.CYAN
-            else                   -> GlowState.GREEN
+            batteryLevel > 95   -> GlowState.GREEN
+            batteryLevel > 75   -> GlowState.CYAN
+            batteryLevel >= 25  -> GlowState.BLUE
+            batteryLevel >= 0   -> GlowState.RED
+            else                -> GlowState.YELLOW
         }
 }

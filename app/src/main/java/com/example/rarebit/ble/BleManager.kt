@@ -9,8 +9,10 @@ import android.os.Looper
 import androidx.annotation.RequiresApi
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import com.example.rarebit.BuildConfig
@@ -68,28 +70,34 @@ class BleManager(context: Context) {
     private val _isScanning = MutableStateFlow(false)
     val isScanning: StateFlow<Boolean> = _isScanning.asStateFlow()
 
-    private val _gattServices = MutableStateFlow<List<GattServiceItem>>(emptyList())
-    val gattServices: StateFlow<List<GattServiceItem>> = _gattServices.asStateFlow()
+    // Per-device GATT service lists; DeviceDetailFragment filters by its own address
+    private val _gattServicesMap = MutableStateFlow<Map<String, List<GattServiceItem>>>(emptyMap())
+    val gattServicesMap: StateFlow<Map<String, List<GattServiceItem>>> = _gattServicesMap.asStateFlow()
 
     private val _charValues = MutableSharedFlow<Pair<String, ByteArray>>(replay = 0)
     val charValues: SharedFlow<Pair<String, ByteArray>> = _charValues.asSharedFlow()
 
-    private var activeGatt: BluetoothGatt? = null
-    private val deviceMap = LinkedHashMap<String, BleDevice>()
-    private val readQueue = ArrayDeque<BluetoothGattCharacteristic>()
+    // One GATT handle, read queue, and connect job per device address
+    private val activeGatts  = LinkedHashMap<String, BluetoothGatt>()
+    private val readQueues   = LinkedHashMap<String, ArrayDeque<BluetoothGattCharacteristic>>()
+    private val connectJobs  = LinkedHashMap<String, Job>()
+    private val deviceMap    = LinkedHashMap<String, BleDevice>()
 
     // ── SCAN ──────────────────────────────────────────────────────────────────
 
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
-            val name = result.scanRecord?.deviceName ?: result.device.name ?: return
-            if (!name.contains("rareBit", ignoreCase = true)) return
+            val rawName = result.scanRecord?.deviceName ?: result.device.name ?: return
+            if (!rawName.contains("rareBit", ignoreCase = true)) return
+            val name = rawName.replace("rareBit", "", ignoreCase = true).trim()
             val address = result.device.address
             val existing = deviceMap[address]
-            val deviceType = when {
-                name.contains("flag", ignoreCase = true)     -> DeviceType.FLAG
-                name.contains("receiver", ignoreCase = true) -> DeviceType.RECEIVER
-                else                                         -> DeviceType.UNKNOWN
+            // Exact advertised names, mirroring iOS RareBitDeviceType.from()
+            val deviceType = when (rawName) {
+                "rareBit PRO Flag"     -> DeviceType.FLAG
+                "rareBit PRO Receiver" -> DeviceType.RECEIVER
+                "rareBit Relay"        -> DeviceType.RELAY
+                else                   -> DeviceType.UNKNOWN
             }
             deviceMap[address] = existing?.copy(rssi = result.rssi)
                 ?: BleDevice(bluetoothDevice = result.device, name = name, rssi = result.rssi, deviceType = deviceType)
@@ -109,7 +117,7 @@ class BleManager(context: Context) {
             .build()
         scanner?.startScan(null, settings, scanCallback)
         scope.launch {
-            kotlinx.coroutines.delay(10_000)
+            delay(10_000)
             stopScan()
         }
     }
@@ -120,18 +128,12 @@ class BleManager(context: Context) {
         _isScanning.value = false
     }
 
-    fun clearDisconnectedDevices() {
-        deviceMap.entries.removeIf { !it.value.isConnected }
-        _devices.value = deviceMap.values.sortedBy { it.name }
-    }
-
     // ── GATT ──────────────────────────────────────────────────────────────────
 
     private val gattCallback = object : BluetoothGattCallback() {
 
         override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
             if (status != BluetoothGatt.GATT_SUCCESS) {
-                // Error (incl. 133/GATT_ERROR) — treat as disconnection and clean up
                 handleGattDisconnect(gatt)
                 return
             }
@@ -146,6 +148,7 @@ class BleManager(context: Context) {
 
         override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
             if (status != BluetoothGatt.GATT_SUCCESS) return
+            val address = gatt.device.address
             val services = gatt.services.map { service ->
                 GattServiceItem(
                     uuid = service.uuid,
@@ -159,23 +162,26 @@ class BleManager(context: Context) {
                     }
                 )
             }
-            mainHandler.post { _gattServices.value = services }
+            mainHandler.post {
+                _gattServicesMap.value = _gattServicesMap.value.toMutableMap().also { it[address] = services }
+            }
 
             val hasConfigService = gatt.services.any { it.uuid == CFG_SERVICE_UUID }
-            updateDevice(gatt.device.address) { it.copy(isDfuOnly = !hasConfigService) }
+            updateDevice(address) { it.copy(isDfuOnly = !hasConfigService) }
 
-            // Queue auto-reads: battery, firmware version, config
-            readQueue.clear()
+            // Build per-device auto-read queue
+            val queue = ArrayDeque<BluetoothGattCharacteristic>()
             gatt.services.forEach { svc ->
                 svc.characteristics.forEach { char ->
                     val autoRead = char.uuid == BATTERY_LEVEL_UUID ||
                                    char.uuid == FW_CHAR_UUID ||
                                    char.uuid == CFG_CHAR_UUID
                     val readable = char.properties and BluetoothGattCharacteristic.PROPERTY_READ != 0
-                    if (autoRead && readable) readQueue.addLast(char)
+                    if (autoRead && readable) queue.addLast(char)
                 }
             }
-            readQueue.removeFirstOrNull()?.let { gatt.readCharacteristic(it) }
+            readQueues[address] = queue
+            queue.removeFirstOrNull()?.let { gatt.readCharacteristic(it) }
         }
 
         @Suppress("DEPRECATION")
@@ -206,7 +212,7 @@ class BleManager(context: Context) {
             characteristic: BluetoothGattCharacteristic
         ) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) return
-            characteristic.value?.let { updateCharValue(characteristic.uuid.toString(), it) }
+            characteristic.value?.let { updateCharValue(gatt.device.address, characteristic.uuid.toString(), it) }
         }
 
         @RequiresApi(Build.VERSION_CODES.TIRAMISU)
@@ -215,69 +221,59 @@ class BleManager(context: Context) {
             characteristic: BluetoothGattCharacteristic,
             value: ByteArray
         ) {
-            updateCharValue(characteristic.uuid.toString(), value)
+            updateCharValue(gatt.device.address, characteristic.uuid.toString(), value)
         }
 
-        override fun onCharacteristicWrite(
-            gatt: BluetoothGatt,
-            characteristic: BluetoothGattCharacteristic,
-            status: Int
-        ) {
-            // Advance the op queue so a pending read/write after this one can proceed
-            readQueue.removeFirstOrNull()?.let { gatt.readCharacteristic(it) }
-        }
-
-        override fun onDescriptorWrite(
-            gatt: BluetoothGatt,
-            descriptor: BluetoothGattDescriptor,
-            status: Int
-        ) {
-            readQueue.removeFirstOrNull()?.let { gatt.readCharacteristic(it) }
-        }
+        // Note: write/descriptor callbacks must NOT touch the read queue — it is
+        // advanced only by handleCharRead, one entry per completed read.
     }
 
     private fun handleGattDisconnect(gatt: BluetoothGatt) {
-        readQueue.clear()
+        val address = gatt.device.address
+        readQueues.remove(address)
         gatt.close()
-        if (gatt == activeGatt) {
-            activeGatt = null
-            mainHandler.post { _gattServices.value = emptyList() }
+        activeGatts.remove(address)
+        mainHandler.post {
+            _gattServicesMap.value = _gattServicesMap.value.toMutableMap().also { it.remove(address) }
         }
-        updateDevice(gatt.device.address) {
-            it.copy(isConnected = false, batteryLevel = -1, configInterval = -1, firmwareVersion = "")
+        updateDevice(address) {
+            it.copy(isConnected = false, batteryLevel = -1, configInterval = -1,
+                    firmwareVersion = "", hasUpdate = false)
         }
     }
 
     private fun handleCharRead(gatt: BluetoothGatt, uuid: UUID, value: ByteArray) {
-        updateCharValue(uuid.toString(), value)
+        val address = gatt.device.address
+        updateCharValue(address, uuid.toString(), value)
         when (uuid) {
             BATTERY_LEVEL_UUID -> if (value.isNotEmpty()) {
                 val level = value[0].toInt() and 0xFF
-                updateDevice(gatt.device.address) { it.copy(batteryLevel = level) }
+                updateDevice(address) { it.copy(batteryLevel = level) }
             }
             FW_CHAR_UUID -> if (value.isNotEmpty()) {
                 val b = value[0].toInt() and 0xFF
                 val version = "${(b shr 4)}.${b and 0x0F}"
-                updateDevice(gatt.device.address) { it.copy(firmwareVersion = version) }
+                updateDevice(address) { it.copy(firmwareVersion = version) }
             }
             CFG_CHAR_UUID -> if (value.isNotEmpty()) {
                 val interval = (value[0].toInt() and 0xFF) shr 6
-                updateDevice(gatt.device.address) { it.copy(configInterval = interval) }
+                updateDevice(address) { it.copy(configInterval = interval) }
             }
         }
-        // Advance the auto-read queue
-        readQueue.removeFirstOrNull()?.let { gatt.readCharacteristic(it) }
+        readQueues[address]?.removeFirstOrNull()?.let { gatt.readCharacteristic(it) }
     }
 
     fun connect(device: BleDevice) {
-        readQueue.clear()
-        activeGatt?.disconnect()
-        activeGatt?.close()
-        activeGatt = null
-        // Give the BLE stack a moment to settle after close before opening a new GATT
-        scope.launch {
-            kotlinx.coroutines.delay(300)
-            activeGatt = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        stopScan()
+        if (activeGatts.containsKey(device.address)) return  // already connected or connecting
+        doConnect(device)
+    }
+
+    private fun doConnect(device: BleDevice) {
+        connectJobs[device.address]?.cancel()
+        connectJobs[device.address] = scope.launch {
+            delay(200)
+            val gatt = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 device.bluetoothDevice.connectGatt(
                     appContext, false, gattCallback, BluetoothDevice.TRANSPORT_LE
                 )
@@ -285,23 +281,27 @@ class BleManager(context: Context) {
                 @Suppress("DEPRECATION")
                 device.bluetoothDevice.connectGatt(appContext, false, gattCallback)
             }
+            activeGatts[device.address] = gatt
+            connectJobs.remove(device.address)
         }
     }
 
     fun disconnect(address: String) {
-        readQueue.clear()
-        activeGatt?.disconnect()
-        // close() is called in onConnectionStateChange STATE_DISCONNECTED
+        connectJobs[address]?.cancel()
+        connectJobs.remove(address)
+        readQueues.remove(address)
+        activeGatts[address]?.disconnect()
+        // close() called in STATE_DISCONNECTED callback
     }
 
-    fun readCharacteristic(serviceUuid: UUID, charUuid: UUID) {
-        val gatt = activeGatt ?: return
+    fun readCharacteristic(address: String, serviceUuid: UUID, charUuid: UUID) {
+        val gatt = activeGatts[address] ?: return
         val char = gatt.getService(serviceUuid)?.getCharacteristic(charUuid) ?: return
         gatt.readCharacteristic(char)
     }
 
-    fun writeCharacteristic(serviceUuid: UUID, charUuid: UUID, value: ByteArray) {
-        val gatt = activeGatt ?: return
+    fun writeCharacteristic(address: String, serviceUuid: UUID, charUuid: UUID, value: ByteArray) {
+        val gatt = activeGatts[address] ?: return
         val char = gatt.getService(serviceUuid)?.getCharacteristic(charUuid) ?: return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             gatt.writeCharacteristic(char, value, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
@@ -313,8 +313,8 @@ class BleManager(context: Context) {
         }
     }
 
-    fun setNotification(serviceUuid: UUID, charUuid: UUID, enable: Boolean) {
-        val gatt = activeGatt ?: return
+    fun setNotification(address: String, serviceUuid: UUID, charUuid: UUID, enable: Boolean) {
+        val gatt = activeGatts[address] ?: return
         val char = gatt.getService(serviceUuid)?.getCharacteristic(charUuid) ?: return
         gatt.setCharacteristicNotification(char, enable)
         val descriptor = char.getDescriptor(CLIENT_CHAR_CONFIG_UUID) ?: return
@@ -330,12 +330,32 @@ class BleManager(context: Context) {
         }
     }
 
+    fun setHasUpdate(address: String, hasUpdate: Boolean) {
+        updateDevice(address) { it.copy(hasUpdate = hasUpdate) }
+    }
+
+    fun clearDisconnectedDevices() {
+        val iter = deviceMap.iterator()
+        while (iter.hasNext()) {
+            if (!iter.next().value.isConnected) iter.remove()
+        }
+        mainHandler.post { _devices.value = deviceMap.values.sortedBy { it.name } }
+    }
+
+    fun scheduleScan(delayMs: Long) {
+        scope.launch {
+            delay(delayMs)
+            startScan()
+        }
+    }
+
     fun cleanup() {
         stopScan()
-        readQueue.clear()
-        activeGatt?.disconnect()
-        activeGatt?.close()
-        activeGatt = null
+        connectJobs.values.forEach { it.cancel() }
+        connectJobs.clear()
+        readQueues.clear()
+        activeGatts.values.forEach { it.disconnect(); it.close() }
+        activeGatts.clear()
         scope.cancel()
     }
 
@@ -347,15 +367,17 @@ class BleManager(context: Context) {
         mainHandler.post { _devices.value = deviceMap.values.sortedBy { it.name } }
     }
 
-    private fun updateCharValue(uuid: String, value: ByteArray) {
+    private fun updateCharValue(address: String, uuid: String, value: ByteArray) {
         mainHandler.post {
-            _gattServices.value = _gattServices.value.map { service ->
+            val updated = _gattServicesMap.value.toMutableMap()
+            updated[address] = updated[address]?.map { service ->
                 service.copy(characteristics = service.characteristics.map { char ->
                     if (char.uuid.toString().equals(uuid, ignoreCase = true))
                         char.copy(value = value)
                     else char
                 })
-            }
+            } ?: emptyList()
+            _gattServicesMap.value = updated
         }
         scope.launch { _charValues.emit(uuid to value) }
     }

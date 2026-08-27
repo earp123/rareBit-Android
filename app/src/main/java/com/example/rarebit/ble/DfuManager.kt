@@ -79,7 +79,10 @@ class DfuManager(private val context: Context) {
         val mgr = FirmwareUpgradeManager(t, callback)
         upgradeManager = mgr
 
-        mgr.setMode(FirmwareUpgradeManager.Mode.TEST_AND_CONFIRM)
+        // Confirm-only, matching iOS: single reboot, no revert-if-unconfirmed
+        // failure mode (TEST_AND_CONFIRM reverts the image if the phone fails
+        // to reconnect after the device resets).
+        mgr.setMode(FirmwareUpgradeManager.Mode.CONFIRM_ONLY)
         mgr.setCallbackOnUiThread(true)
 
         val settings = FirmwareUpgradeManager.Settings.Builder()

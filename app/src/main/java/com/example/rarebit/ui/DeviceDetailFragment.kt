@@ -24,6 +24,7 @@ import com.example.rarebit.ble.FirmwareRepository
 import com.example.rarebit.ble.GlowState
 import com.example.rarebit.ble.ReleaseInfo
 import com.google.android.material.card.MaterialCardView
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.slider.Slider
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
@@ -37,8 +38,14 @@ class DeviceDetailFragment : Fragment() {
     private val bleManager get() = (requireActivity() as MainActivity).bleManager
     private val dfuManager get() = (requireActivity() as MainActivity).dfuManager
 
+    private enum class ActiveDfu { NONE, RELAY, RESTORE }
+
     private var pendingRelease: ReleaseInfo? = null
+    private var pendingRelayRelease: ReleaseInfo? = null
     private var versionFetchStarted = false
+    private var activeDfu = ActiveDfu.NONE
+    private var deviceWasConnected = false
+    private var dfuStartedByThisFragment = false
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -68,6 +75,24 @@ class DeviceDetailFragment : Fragment() {
         val loadingOverlay: View = view.findViewById(R.id.loadingOverlay)
         val loadingStatusText: TextView = view.findViewById(R.id.loadingStatusText)
         val scrollContent: NestedScrollView = view.findViewById(R.id.scrollContent)
+        val relayCard: MaterialCardView = view.findViewById(R.id.relayCard)
+        val relayChevron: ImageView = view.findViewById(R.id.relayChevron)
+        val relayDetail: View = view.findViewById(R.id.relayDetail)
+        val relayButton: Button = view.findViewById(R.id.relayButton)
+        val relayProgress: ProgressBar = view.findViewById(R.id.relayProgress)
+        val relayStatusText: TextView = view.findViewById(R.id.relayStatusText)
+        val restoreCard: MaterialCardView = view.findViewById(R.id.restoreCard)
+        val restoreChevron: ImageView = view.findViewById(R.id.restoreChevron)
+        val restoreDetail: View = view.findViewById(R.id.restoreDetail)
+        val restoreButton: Button = view.findViewById(R.id.restoreButton)
+        val restoreProgress: ProgressBar = view.findViewById(R.id.restoreProgress)
+        val restoreStatusText: TextView = view.findViewById(R.id.restoreStatusText)
+
+        // Reset any terminal DFU state left over from a previous session so the
+        // stale Success/Error value doesn't immediately trigger navigation in this fragment.
+        dfuManager.state.value.let {
+            if (it is DfuState.Success || it is DfuState.Error) dfuManager.cancel()
+        }
 
         view.findViewById<ImageButton>(R.id.backButton).setOnClickListener {
             findNavController().navigateUp()
@@ -83,6 +108,73 @@ class DeviceDetailFragment : Fragment() {
             infoChevron.rotation = if (expanding) 90f else 0f
         }
 
+        relayCard.setOnClickListener {
+            val expanding = relayDetail.visibility == View.GONE
+            relayDetail.visibility = if (expanding) View.VISIBLE else View.GONE
+            relayChevron.rotation = if (expanding) 90f else 0f
+        }
+
+        relayButton.setOnClickListener {
+            val device = bleManager.devices.value.firstOrNull { it.address == deviceAddress }
+                ?: return@setOnClickListener
+            val release = pendingRelayRelease
+            if (release == null) {
+                relayStatusText.text = "No firmware URL — check PAT / network"
+                return@setOnClickListener
+            }
+            MaterialAlertDialogBuilder(requireContext())
+                .setTitle("Flash Relay Firmware?")
+                .setMessage(
+                    "This requires a smartwatch. Flashing Relay firmware will replace the " +
+                    "Receiver firmware, and the device will no longer vibrate when alerted. " +
+                    "Do you want to continue?"
+                )
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Continue") { _, _ ->
+                    activeDfu = ActiveDfu.RELAY
+                    dfuStartedByThisFragment = true
+                    viewLifecycleOwner.lifecycleScope.launch {
+                        dfuManager.downloadAndUpgrade(
+                            device.bluetoothDevice, release.assetApiUrl, BuildConfig.GITHUB_PAT
+                        )
+                    }
+                }
+                .show()
+        }
+
+        restoreCard.setOnClickListener {
+            val expanding = restoreDetail.visibility == View.GONE
+            restoreDetail.visibility = if (expanding) View.VISIBLE else View.GONE
+            restoreChevron.rotation = if (expanding) 90f else 0f
+        }
+
+        restoreButton.setOnClickListener {
+            val device = bleManager.devices.value.firstOrNull { it.address == deviceAddress }
+                ?: return@setOnClickListener
+            val release = pendingRelease
+            if (release == null) {
+                restoreStatusText.text = "No firmware URL — check PAT / network"
+                return@setOnClickListener
+            }
+            MaterialAlertDialogBuilder(requireContext())
+                .setTitle("Revert to Receiver Firmware?")
+                .setMessage(
+                    "Reverting to Receiver firmware will restore vibration alerts but " +
+                    "remove smartwatch functionality. Do you want to continue?"
+                )
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Continue") { _, _ ->
+                    activeDfu = ActiveDfu.RESTORE
+                    dfuStartedByThisFragment = true
+                    viewLifecycleOwner.lifecycleScope.launch {
+                        dfuManager.downloadAndUpgrade(
+                            device.bluetoothDevice, release.assetApiUrl, BuildConfig.GITHUB_PAT
+                        )
+                    }
+                }
+                .show()
+        }
+
         dfuButton.setOnClickListener {
             val device = bleManager.devices.value.firstOrNull { it.address == deviceAddress }
                 ?: return@setOnClickListener
@@ -91,6 +183,7 @@ class DeviceDetailFragment : Fragment() {
                 dfuStatusText.text = "No firmware URL — check PAT / network"
                 return@setOnClickListener
             }
+            dfuStartedByThisFragment = true
             viewLifecycleOwner.lifecycleScope.launch {
                 dfuManager.downloadAndUpgrade(
                     device.bluetoothDevice, release.assetApiUrl, BuildConfig.GITHUB_PAT
@@ -98,49 +191,132 @@ class DeviceDetailFragment : Fragment() {
             }
         }
 
-        // Observe DFU state
+        // Observe DFU state — routed by activeDfu enum
         viewLifecycleOwner.lifecycleScope.launch {
             dfuManager.state.collectLatest { state ->
-                when (state) {
-                    is DfuState.Idle -> {
-                        dfuStatusText.text = ""
-                        dfuProgress.visibility = View.GONE
-                        dfuButton.isEnabled = true
-                    }
-                    is DfuState.Downloading -> {
-                        dfuStatusText.text = "Downloading…"
-                        dfuProgress.visibility = View.VISIBLE
-                        dfuProgress.isIndeterminate = true
-                        dfuButton.isEnabled = false
-                    }
-                    is DfuState.Uploading -> {
-                        dfuStatusText.text = "Uploading…"
-                        dfuProgress.visibility = View.VISIBLE
-                        dfuProgress.isIndeterminate = true
-                        dfuButton.isEnabled = false
-                    }
-                    is DfuState.Progress -> {
-                        dfuStatusText.text = "${state.percent}%"
-                        dfuProgress.visibility = View.VISIBLE
-                        dfuProgress.isIndeterminate = false
-                        dfuProgress.progress = state.percent
-                        dfuButton.isEnabled = false
-                    }
-                    is DfuState.Success -> {
-                        val device = bleManager.devices.value.firstOrNull { it.address == deviceAddress }
-                        pendingRelease?.let { release ->
-                            device?.let { d ->
-                                FirmwareRepository.saveInstalledVersion(
-                                    requireContext(), d.deviceType, release.version
-                                )
-                            }
+                when (activeDfu) {
+                    ActiveDfu.RELAY -> when (state) {
+                        is DfuState.Idle -> {
+                            relayStatusText.text = ""
+                            relayProgress.visibility = View.GONE
+                            relayButton.isEnabled = true
+                            activeDfu = ActiveDfu.NONE
                         }
-                        if (isAdded) findNavController().navigateUp()
+                        is DfuState.Downloading -> {
+                            relayStatusText.text = "Downloading…"
+                            relayProgress.visibility = View.VISIBLE
+                            relayProgress.isIndeterminate = true
+                            relayButton.isEnabled = false
+                        }
+                        is DfuState.Uploading -> {
+                            relayStatusText.text = "Uploading…"
+                            relayProgress.visibility = View.VISIBLE
+                            relayProgress.isIndeterminate = true
+                            relayButton.isEnabled = false
+                        }
+                        is DfuState.Progress -> {
+                            relayStatusText.text = "${state.percent}%"
+                            relayProgress.visibility = View.VISIBLE
+                            relayProgress.isIndeterminate = false
+                            relayProgress.progress = state.percent
+                            relayButton.isEnabled = false
+                        }
+                        is DfuState.Success -> {
+                            activeDfu = ActiveDfu.NONE
+                            relayStatusText.text = "Rebooting…"
+                            relayButton.isEnabled = false
+                            bleManager.scheduleScan(20_000)
+                            if (isAdded) findNavController().navigateUp()
+                        }
+                        is DfuState.Error -> {
+                            relayStatusText.text = "Error: ${state.message}"
+                            relayProgress.visibility = View.GONE
+                            relayButton.isEnabled = true
+                            activeDfu = ActiveDfu.NONE
+                        }
                     }
-                    is DfuState.Error -> {
-                        dfuStatusText.text = "Error: ${state.message}"
-                        dfuProgress.visibility = View.GONE
-                        dfuButton.isEnabled = true
+                    ActiveDfu.RESTORE -> when (state) {
+                        is DfuState.Idle -> {
+                            restoreStatusText.text = ""
+                            restoreProgress.visibility = View.GONE
+                            restoreButton.isEnabled = true
+                            activeDfu = ActiveDfu.NONE
+                        }
+                        is DfuState.Downloading -> {
+                            restoreStatusText.text = "Downloading…"
+                            restoreProgress.visibility = View.VISIBLE
+                            restoreProgress.isIndeterminate = true
+                            restoreButton.isEnabled = false
+                        }
+                        is DfuState.Uploading -> {
+                            restoreStatusText.text = "Uploading…"
+                            restoreProgress.visibility = View.VISIBLE
+                            restoreProgress.isIndeterminate = true
+                            restoreButton.isEnabled = false
+                        }
+                        is DfuState.Progress -> {
+                            restoreStatusText.text = "${state.percent}%"
+                            restoreProgress.visibility = View.VISIBLE
+                            restoreProgress.isIndeterminate = false
+                            restoreProgress.progress = state.percent
+                            restoreButton.isEnabled = false
+                        }
+                        is DfuState.Success -> {
+                            activeDfu = ActiveDfu.NONE
+                            restoreStatusText.text = "Rebooting…"
+                            restoreButton.isEnabled = false
+                            bleManager.scheduleScan(20_000)
+                            if (isAdded) findNavController().navigateUp()
+                        }
+                        is DfuState.Error -> {
+                            restoreStatusText.text = "Error: ${state.message}"
+                            restoreProgress.visibility = View.GONE
+                            restoreButton.isEnabled = true
+                            activeDfu = ActiveDfu.NONE
+                        }
+                    }
+                    ActiveDfu.NONE -> when (state) {
+                        is DfuState.Idle -> {
+                            dfuStatusText.text = ""
+                            dfuProgress.visibility = View.GONE
+                            dfuButton.isEnabled = true
+                        }
+                        is DfuState.Downloading -> {
+                            if (!dfuStartedByThisFragment) return@collectLatest
+                            dfuStatusText.text = "Downloading…"
+                            dfuProgress.visibility = View.VISIBLE
+                            dfuProgress.isIndeterminate = true
+                            dfuButton.isEnabled = false
+                        }
+                        is DfuState.Uploading -> {
+                            if (!dfuStartedByThisFragment) return@collectLatest
+                            dfuStatusText.text = "Uploading…"
+                            dfuProgress.visibility = View.VISIBLE
+                            dfuProgress.isIndeterminate = true
+                            dfuButton.isEnabled = false
+                        }
+                        is DfuState.Progress -> {
+                            if (!dfuStartedByThisFragment) return@collectLatest
+                            dfuStatusText.text = "${state.percent}%"
+                            dfuProgress.visibility = View.VISIBLE
+                            dfuProgress.isIndeterminate = false
+                            dfuProgress.progress = state.percent
+                            dfuButton.isEnabled = false
+                        }
+                        is DfuState.Success -> {
+                            if (!dfuStartedByThisFragment) return@collectLatest
+                            bleManager.setHasUpdate(deviceAddress, false)
+                            dfuStatusText.text = "Rebooting…"
+                            dfuButton.isEnabled = false
+                            bleManager.scheduleScan(20_000)
+                            if (isAdded) findNavController().navigateUp()
+                        }
+                        is DfuState.Error -> {
+                            if (!dfuStartedByThisFragment) return@collectLatest
+                            dfuStatusText.text = "Error: ${state.message}"
+                            dfuProgress.visibility = View.GONE
+                            dfuButton.isEnabled = true
+                        }
                     }
                 }
             }
@@ -148,9 +324,17 @@ class DeviceDetailFragment : Fragment() {
 
         // Observe device + services — drive loading state machine and keep UI current
         viewLifecycleOwner.lifecycleScope.launch {
-            combine(bleManager.devices, bleManager.gattServices) { devices, services ->
-                (devices.firstOrNull { it.address == deviceAddress }) to services
+            combine(bleManager.devices, bleManager.gattServicesMap) { devices, servicesMap ->
+                (devices.firstOrNull { it.address == deviceAddress }) to (servicesMap[deviceAddress] ?: emptyList())
             }.collectLatest { (device, services) ->
+                if (device?.isConnected == true) deviceWasConnected = true
+
+                if (deviceWasConnected && (device == null || !device.isConnected)) {
+                    bleManager.startScan()
+                    if (isAdded) findNavController().navigateUp()
+                    return@collectLatest
+                }
+
                 if (device == null) return@collectLatest
 
                 titleDeviceName.text = device.name
@@ -158,6 +342,7 @@ class DeviceDetailFragment : Fragment() {
                     when (device.deviceType) {
                         DeviceType.FLAG     -> R.drawable.ic_device_flag
                         DeviceType.RECEIVER -> R.drawable.ic_device_receiver
+                        DeviceType.RELAY    -> R.drawable.ic_relay
                         DeviceType.UNKNOWN  -> R.drawable.ic_device_unknown
                     }
                 )
@@ -198,28 +383,23 @@ class DeviceDetailFragment : Fragment() {
                         versionFetchStarted = true
                         loadingStatusText.text = "Checking for updates…"
                         launch {
-                            var release: com.example.rarebit.ble.ReleaseInfo? = null
-                            var fetchError: String? = null
+                            var release: ReleaseInfo? = null
                             try {
                                 release = FirmwareRepository.fetchReleaseInfo(
                                     device.deviceType, BuildConfig.GITHUB_PAT
                                 )
-                                // DFU-only devices with unknown type fall back to FLAG firmware
-                                if (release == null && device.isDfuOnly) {
-                                    release = FirmwareRepository.fetchReleaseInfo(
-                                        DeviceType.FLAG, BuildConfig.GITHUB_PAT
-                                    )
-                                }
                             } catch (e: Exception) {
-                                fetchError = e.message ?: e.javaClass.simpleName
+                                android.util.Log.w("DeviceDetail", "Release fetch failed", e)
                             }
                             pendingRelease = release
 
-                            val installed = FirmwareRepository.getInstalledVersion(
-                                requireContext(), device.deviceType
-                            )
+                            // Device is the source of truth: compare the release against
+                            // the FW-version characteristic (iOS parity). Unreadable FWV
+                            // on an updatable device type = old firmware, offer recovery.
                             val hasUpdate = release != null &&
-                                (installed == null || FirmwareRepository.isNewerVersion(release.version, installed))
+                                (device.firmwareVersion.isEmpty() ||
+                                 FirmwareRepository.isNewerVersion(release.version, device.firmwareVersion))
+                            bleManager.setHasUpdate(device.address, hasUpdate)
 
                             val showDfu = device.isDfuOnly || hasUpdate
                             dfuCard.visibility = if (showDfu) View.VISIBLE else View.GONE
@@ -233,6 +413,28 @@ class DeviceDetailFragment : Fragment() {
                                 release != null  -> "Update to v${release.version}"
                                 else             -> "Update Firmware"
                             }
+
+                            // Relay card: RECEIVER with firmware < 10.x → flash RX_RLY
+                            // Restore card: RECEIVER with firmware >= 10.x → restore normal RX
+                            val isReceiver = device.deviceType == DeviceType.RECEIVER &&
+                                device.firmwareVersion.isNotEmpty()
+                            val belowRelay = isReceiver &&
+                                FirmwareRepository.isNewerVersion("10.0", device.firmwareVersion)
+                            val aboveRelay = isReceiver && !belowRelay
+
+                            if (belowRelay) {
+                                try {
+                                    pendingRelayRelease = FirmwareRepository.fetchRelayReleaseInfo(
+                                        BuildConfig.GITHUB_PAT
+                                    )
+                                } catch (_: Exception) { }
+                                relayCard.visibility = if (pendingRelayRelease != null) View.VISIBLE else View.GONE
+                            } else {
+                                relayCard.visibility = View.GONE
+                            }
+
+                            restoreCard.visibility =
+                                if (aboveRelay && pendingRelease != null) View.VISIBLE else View.GONE
 
                             loadingOverlay.visibility = View.GONE
                             scrollContent.visibility = View.VISIBLE

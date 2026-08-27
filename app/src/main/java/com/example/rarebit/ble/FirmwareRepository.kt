@@ -1,6 +1,5 @@
 package com.example.rarebit.ble
 
-import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -19,52 +18,67 @@ object FirmwareRepository {
     private const val RELEASES_URL =
         "https://api.github.com/repos/earp123/rareBit-Flags-Receivers/releases"
 
-    private val FLAG_TAG_PREFIXES     = listOf("FLAG")
-    private val RECEIVER_TAG_PREFIXES = listOf("RX", "RECV")
+    // Exact tags mirror iOS RareBitDeviceType.releaseTag; the prefix is the
+    // fallback when tags are misconfigured (same as iOS fetchReleaseWithFallback).
+    // Update the exact tags when releasing new firmware.
+    private data class TagSpec(val exact: String, val prefix: String)
+
+    private val TAG_SPECS = mapOf(
+        DeviceType.FLAG     to TagSpec("PRO_FLAG_v1.9.0", "PRO_FLAG"),
+        DeviceType.RECEIVER to TagSpec("PRO_RX_v1.8.0", "PRO_RX")
+    )
+    // Receiver ⇄ Relay firmware swap (SMP flow). The Relay device itself uses
+    // legacy Nordic DFU and never fetches from this repo.
+    private val RELAY_SWAP_SPEC = TagSpec("RXRLY_v10.0", "RXRLY")
 
     private val cache = mutableMapOf<DeviceType, ReleaseInfo>()
+    private var relayCache: ReleaseInfo? = null
 
-    fun clearCache() = cache.clear()
+    fun clearCache() { cache.clear(); relayCache = null }
 
     suspend fun fetchReleaseInfo(deviceType: DeviceType, pat: String): ReleaseInfo? =
         withContext(Dispatchers.IO) {
             cache[deviceType]?.let { return@withContext it }
-
-            val tagPrefixes = when (deviceType) {
-                DeviceType.FLAG     -> FLAG_TAG_PREFIXES
-                DeviceType.RECEIVER -> RECEIVER_TAG_PREFIXES
-                DeviceType.UNKNOWN  -> return@withContext null
-            }
-
-            val json = githubGet(RELEASES_URL, pat, "application/vnd.github+json")
-            val releases = JSONArray(json)
-            Log.d("FirmwareRepo", "Total releases: ${releases.length()}")
-
-            for (i in 0 until releases.length()) {
-                val release = releases.getJSONObject(i)
-                val tagName = release.getString("tag_name")
-                Log.d("FirmwareRepo", "release[$i]: $tagName")
-
-                val matches = tagPrefixes.any { tagName.contains(it, ignoreCase = true) }
-                if (!matches) continue
-
-                val version = parseVersion(tagName) ?: continue
-                Log.d("FirmwareRepo", "matched: $tagName -> $version")
-
-                val assets = release.getJSONArray("assets")
-                for (j in 0 until assets.length()) {
-                    val asset = assets.getJSONObject(j)
-                    val name = asset.getString("name")
-                    if (name.endsWith(".bin")) {
-                        val assetApiUrl = asset.getString("url")
-                        Log.d("FirmwareRepo", "asset: $name -> $assetApiUrl")
-                        return@withContext ReleaseInfo(version, assetApiUrl)
-                            .also { cache[deviceType] = it }
-                    }
-                }
-            }
-            null
+            val spec = TAG_SPECS[deviceType] ?: return@withContext null
+            findRelease(spec, pat)?.also { cache[deviceType] = it }
         }
+
+    suspend fun fetchRelayReleaseInfo(pat: String): ReleaseInfo? =
+        withContext(Dispatchers.IO) {
+            relayCache?.let { return@withContext it }
+            findRelease(RELAY_SWAP_SPEC, pat)?.also { relayCache = it }
+        }
+
+    private fun findRelease(spec: TagSpec, pat: String): ReleaseInfo? {
+        val json = githubGet(RELEASES_URL, pat, "application/vnd.github+json")
+        val releases = JSONArray(json)
+        Log.d("FirmwareRepo", "Total releases: ${releases.length()}")
+
+        var exact: JSONObject? = null
+        var prefixed: JSONObject? = null
+        for (i in 0 until releases.length()) {
+            val release = releases.getJSONObject(i)
+            val tagName = release.getString("tag_name")
+            if (tagName == spec.exact) { exact = release; break }
+            if (prefixed == null && tagName.startsWith(spec.prefix, ignoreCase = true)) {
+                prefixed = release
+            }
+        }
+        val release = exact ?: prefixed ?: return null
+        val tagName = release.getString("tag_name")
+        if (exact == null) Log.w("FirmwareRepo", "Exact tag ${spec.exact} not found; using $tagName")
+
+        val version = parseVersion(tagName) ?: return null
+        val assets = release.getJSONArray("assets")
+        for (j in 0 until assets.length()) {
+            val asset = assets.getJSONObject(j)
+            if (asset.getString("name").endsWith(".bin")) {
+                Log.d("FirmwareRepo", "matched: $tagName -> $version (${asset.getString("name")})")
+                return ReleaseInfo(version, asset.getString("url"))
+            }
+        }
+        return null
+    }
 
     suspend fun downloadFirmware(assetApiUrl: String, pat: String): ByteArray =
         withContext(Dispatchers.IO) { downloadAsset(assetApiUrl, pat) }
@@ -80,15 +94,6 @@ object FirmwareRepository {
             if (rv != dv) return rv > dv
         }
         return false
-    }
-
-    fun getInstalledVersion(context: Context, deviceType: DeviceType): String? =
-        context.getSharedPreferences("firmware_prefs", Context.MODE_PRIVATE)
-            .getString("installed_${deviceType.name}", null)
-
-    fun saveInstalledVersion(context: Context, deviceType: DeviceType, version: String) {
-        context.getSharedPreferences("firmware_prefs", Context.MODE_PRIVATE)
-            .edit().putString("installed_${deviceType.name}", version).apply()
     }
 
     private fun parseVersion(tagName: String): String? =

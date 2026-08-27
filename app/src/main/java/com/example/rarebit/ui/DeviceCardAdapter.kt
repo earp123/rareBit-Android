@@ -117,9 +117,25 @@ class DeviceCardAdapter(
             when (device.deviceType) {
                 DeviceType.FLAG     -> R.drawable.ic_device_flag
                 DeviceType.RECEIVER -> R.drawable.ic_device_receiver
+                DeviceType.RELAY    -> R.drawable.ic_relay
                 DeviceType.UNKNOWN  -> R.drawable.ic_device_unknown
             }
         )
+        val density = holder.deviceTypeIcon.context.resources.displayMetrics.density
+        val sizeDp = when (device.deviceType) {
+            DeviceType.FLAG     -> 67
+            DeviceType.RECEIVER -> 51
+            else                -> 51
+        }
+        val sizePx = (sizeDp * density + 0.5f).toInt()
+        // Keep icon centers aligned at a fixed distance from the card's right edge
+        val centerFromRightDp = 47
+        val marginEndPx = ((centerFromRightDp - sizeDp / 2) * density + 0.5f).toInt()
+        val lp = holder.deviceTypeIcon.layoutParams as android.view.ViewGroup.MarginLayoutParams
+        lp.width = sizePx
+        lp.height = sizePx
+        lp.marginEnd = marginEndPx
+        holder.deviceTypeIcon.layoutParams = lp
     }
 
     private fun updateRssiBar(holder: ViewHolder, device: BleDevice) {
