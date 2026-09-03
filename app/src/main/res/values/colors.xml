@@ -22,4 +22,7 @@
 
     <!-- Status dot default -->
     <color name="status_dot_disconnected">#FF555555</color>
+
+    <!-- Unified control surfaces (sliders, switches) -->
+    <color name="control_track">#FF3A3A3A</color>
 </resources>

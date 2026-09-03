@@ -101,9 +101,10 @@ class DeviceCardAdapter(
     private fun bindConnected(holder: ViewHolder, device: BleDevice) {
         val color = glowColor(device.glowState)
 
+        val density = holder.card.context.resources.displayMetrics.density
         holder.card.setCardBackgroundColor(Color.parseColor("#1A1A1A"))
         holder.card.strokeColor = color
-        holder.card.strokeWidth = 4  // 2dp in pixels at density 2 = 4px; using raw px
+        holder.card.strokeWidth = (2 * density + 0.5f).toInt()
         holder.glowCard.setGlowColor(color)
         holder.glowCard.showGlow(animate = true)
 
@@ -121,10 +122,10 @@ class DeviceCardAdapter(
                 DeviceType.UNKNOWN  -> R.drawable.ic_device_unknown
             }
         )
-        val density = holder.deviceTypeIcon.context.resources.displayMetrics.density
         val sizeDp = when (device.deviceType) {
             DeviceType.FLAG     -> 67
             DeviceType.RECEIVER -> 51
+            DeviceType.RELAY    -> 60   // tall icon (device body + arcs)
             else                -> 51
         }
         val sizePx = (sizeDp * density + 0.5f).toInt()

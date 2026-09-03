@@ -10,7 +10,6 @@ import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.ProgressBar
 import android.widget.TextView
-import androidx.appcompat.widget.SwitchCompat
 import androidx.core.widget.NestedScrollView
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
@@ -25,6 +24,7 @@ import com.example.rarebit.ble.GlowState
 import com.example.rarebit.ble.ReleaseInfo
 import com.google.android.material.card.MaterialCardView
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.android.material.materialswitch.MaterialSwitch
 import com.google.android.material.slider.Slider
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
@@ -46,6 +46,7 @@ class DeviceDetailFragment : Fragment() {
     private var activeDfu = ActiveDfu.NONE
     private var deviceWasConnected = false
     private var dfuStartedByThisFragment = false
+    private var userSliding = false
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -63,9 +64,11 @@ class DeviceDetailFragment : Fragment() {
         val settingsCard: MaterialCardView = view.findViewById(R.id.settingsCard)
         val batteryValue: TextView = view.findViewById(R.id.batteryValue)
         val firmwareValue: TextView = view.findViewById(R.id.firmwareValue)
-        val alertToggle: SwitchCompat = view.findViewById(R.id.alertToggle)
+        val alertToggle: MaterialSwitch = view.findViewById(R.id.alertToggle)
         val delaySlider: Slider = view.findViewById(R.id.delaySlider)
         val delayValue: TextView = view.findViewById(R.id.delayValue)
+        val delayLabel: View = view.findViewById(R.id.delayLabel)
+        val delayRow: View = view.findViewById(R.id.delayRow)
         val infoCard: MaterialCardView = view.findViewById(R.id.infoCard)
         val infoChevron: ImageView = view.findViewById(R.id.infoChevron)
         val infoDetail: View = view.findViewById(R.id.infoDetail)
@@ -98,8 +101,21 @@ class DeviceDetailFragment : Fragment() {
             findNavController().navigateUp()
         }
 
+        // Slider is the raw GATT field (0-15); display converts to ms (×20)
         delaySlider.addOnChangeListener { _, value, _ ->
-            delayValue.text = value.toInt().toString()
+            delayValue.text = "${value.toInt() * 20}"
+        }
+        delaySlider.addOnSliderTouchListener(object : Slider.OnSliderTouchListener {
+            override fun onStartTrackingTouch(slider: Slider) { userSliding = true }
+            override fun onStopTrackingTouch(slider: Slider) {
+                userSliding = false
+                bleManager.setShortPressDelay(deviceAddress, slider.value.toInt())
+            }
+        })
+
+        alertToggle.setOnCheckedChangeListener { button, isChecked ->
+            // isPressed distinguishes user taps from programmatic state sync
+            if (button.isPressed) bleManager.setShortPressEnabled(deviceAddress, isChecked)
         }
 
         infoCard.setOnClickListener {
@@ -362,6 +378,21 @@ class DeviceDetailFragment : Fragment() {
                 }
                 firmwareValue.text = if (device.firmwareVersion.isNotEmpty())
                     "Firmware: ${device.firmwareVersion}" else "Firmware: --"
+
+                // Sync settings controls from the device-reported CFG byte.
+                // Optimistic writes update the same state, so no flicker.
+                if (alertToggle.isChecked != device.shortPressEnabled && !alertToggle.isPressed) {
+                    alertToggle.isChecked = device.shortPressEnabled
+                }
+                if (device.shortPressDelay >= 0 && !userSliding &&
+                    delaySlider.value.toInt() != device.shortPressDelay) {
+                    delaySlider.value = device.shortPressDelay.toFloat()
+                }
+
+                // Delay slider is a Flag-only control (iOS parity)
+                val showDelay = device.deviceType == DeviceType.FLAG
+                delayLabel.visibility = if (showDelay) View.VISIBLE else View.GONE
+                delayRow.visibility = if (showDelay) View.VISIBLE else View.GONE
 
                 // Update loading status text while still in loading state
                 if (!versionFetchStarted) {

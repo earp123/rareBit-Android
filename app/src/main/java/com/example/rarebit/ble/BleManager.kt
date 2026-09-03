@@ -4,6 +4,7 @@ import android.bluetooth.*
 import android.bluetooth.le.*
 import android.content.Context
 import android.os.Build
+import android.os.ParcelUuid
 import android.os.Handler
 import android.os.Looper
 import androidx.annotation.RequiresApi
@@ -82,6 +83,7 @@ class BleManager(context: Context) {
     private val readQueues   = LinkedHashMap<String, ArrayDeque<BluetoothGattCharacteristic>>()
     private val connectJobs  = LinkedHashMap<String, Job>()
     private val deviceMap    = LinkedHashMap<String, BleDevice>()
+    private val cfgNotifySubscribed = HashSet<String>()
 
     // ── SCAN ──────────────────────────────────────────────────────────────────
 
@@ -115,7 +117,14 @@ class BleManager(context: Context) {
         val settings = ScanSettings.Builder()
             .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
             .build()
-        scanner?.startScan(null, settings, scanCallback)
+        // Only rareBit devices advertise the config service — hardware-level
+        // filter keeps bootloaders / third-party devices out of the callback.
+        val filters = listOf(
+            ScanFilter.Builder()
+                .setServiceUuid(ParcelUuid(CFG_SERVICE_UUID))
+                .build()
+        )
+        scanner?.startScan(filters, settings, scanCallback)
         scope.launch {
             delay(10_000)
             stopScan()
@@ -212,7 +221,7 @@ class BleManager(context: Context) {
             characteristic: BluetoothGattCharacteristic
         ) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) return
-            characteristic.value?.let { updateCharValue(gatt.device.address, characteristic.uuid.toString(), it) }
+            characteristic.value?.let { parseCharValue(gatt.device.address, characteristic.uuid, it) }
         }
 
         @RequiresApi(Build.VERSION_CODES.TIRAMISU)
@@ -221,7 +230,7 @@ class BleManager(context: Context) {
             characteristic: BluetoothGattCharacteristic,
             value: ByteArray
         ) {
-            updateCharValue(gatt.device.address, characteristic.uuid.toString(), value)
+            parseCharValue(gatt.device.address, characteristic.uuid, value)
         }
 
         // Note: write/descriptor callbacks must NOT touch the read queue — it is
@@ -231,6 +240,7 @@ class BleManager(context: Context) {
     private fun handleGattDisconnect(gatt: BluetoothGatt) {
         val address = gatt.device.address
         readQueues.remove(address)
+        cfgNotifySubscribed.remove(address)
         gatt.close()
         activeGatts.remove(address)
         mainHandler.post {
@@ -238,29 +248,77 @@ class BleManager(context: Context) {
         }
         updateDevice(address) {
             it.copy(isConnected = false, batteryLevel = -1, configInterval = -1,
-                    firmwareVersion = "", hasUpdate = false)
+                    firmwareVersion = "", hasUpdate = false,
+                    configByte = -1, shortPressDelay = -1, shortPressEnabled = false)
         }
     }
 
     private fun handleCharRead(gatt: BluetoothGatt, uuid: UUID, value: ByteArray) {
         val address = gatt.device.address
+        parseCharValue(address, uuid, value)
+        val next = readQueues[address]?.removeFirstOrNull()
+        if (next != null) {
+            gatt.readCharacteristic(next)
+        } else if (cfgNotifySubscribed.add(address)) {
+            // Read queue drained — the GATT is idle, safe to write the CCC
+            // descriptor. Live CFG updates (battery, config echoes) from here on.
+            setNotification(address, CFG_SERVICE_UUID, CFG_CHAR_UUID, true)
+        }
+    }
+
+    // Shared by reads and notifications so both update device state
+    private fun parseCharValue(address: String, uuid: UUID, value: ByteArray) {
         updateCharValue(address, uuid.toString(), value)
+        if (value.isEmpty()) return
         when (uuid) {
-            BATTERY_LEVEL_UUID -> if (value.isNotEmpty()) {
+            BATTERY_LEVEL_UUID -> {
                 val level = value[0].toInt() and 0xFF
                 updateDevice(address) { it.copy(batteryLevel = level) }
             }
-            FW_CHAR_UUID -> if (value.isNotEmpty()) {
+            FW_CHAR_UUID -> {
                 val b = value[0].toInt() and 0xFF
                 val version = "${(b shr 4)}.${b and 0x0F}"
                 updateDevice(address) { it.copy(firmwareVersion = version) }
             }
-            CFG_CHAR_UUID -> if (value.isNotEmpty()) {
-                val interval = (value[0].toInt() and 0xFF) shr 6
-                updateDevice(address) { it.copy(configInterval = interval) }
-            }
+            CFG_CHAR_UUID -> applyConfigByte(address, value[0].toInt() and 0xFF)
         }
-        readQueues[address]?.removeFirstOrNull()?.let { gatt.readCharacteristic(it) }
+    }
+
+    // CFG byte layout (iOS parity): bits7-6 battery, bits5-2 delay ×20ms,
+    // bit0 short-press enable
+    private fun applyConfigByte(address: String, byte: Int) {
+        updateDevice(address) {
+            it.copy(
+                configByte = byte,
+                configInterval = byte shr 6,
+                shortPressDelay = (byte shr 2) and 0x0F,
+                shortPressEnabled = (byte and 0x01) != 0
+            )
+        }
+    }
+
+    // ── CONFIG WRITES ─────────────────────────────────────────────────────────
+    // iOS-parity invariants: never write without a device-reported base byte,
+    // modify only the target bits, skip no-op writes, update UI optimistically.
+
+    fun setShortPressEnabled(address: String, enabled: Boolean) {
+        writeConfigBits(address) { base ->
+            if (enabled) base or 0b0000_0001 else base and 0b1111_1110
+        }
+    }
+
+    fun setShortPressDelay(address: String, delay: Int) {
+        val d = delay.coerceIn(0, 15)
+        writeConfigBits(address) { base -> (base and 0b1100_0011) or (d shl 2) }
+    }
+
+    private fun writeConfigBits(address: String, transform: (Int) -> Int) {
+        val base = deviceMap[address]?.configByte ?: return
+        if (base < 0) return  // no device-reported byte yet — never write 0x00
+        val newByte = transform(base) and 0xFF
+        if (newByte == base) return
+        applyConfigByte(address, newByte)
+        writeCharacteristic(address, CFG_SERVICE_UUID, CFG_CHAR_UUID, byteArrayOf(newByte.toByte()))
     }
 
     fun connect(device: BleDevice) {

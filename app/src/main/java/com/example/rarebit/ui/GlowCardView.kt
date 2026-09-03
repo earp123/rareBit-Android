@@ -51,7 +51,8 @@ class GlowCardView @JvmOverloads constructor(
 private class GlowSurface(context: Context) : View(context) {
 
     private val blurRadius = 24f * context.resources.displayMetrics.density
-    private val cornerRadius = 12f * context.resources.displayMetrics.density
+    // Must track app:cardCornerRadius in item_device_card.xml
+    private val cornerRadius = 26f * context.resources.displayMetrics.density
 
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL

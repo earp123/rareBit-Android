@@ -91,7 +91,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginBottom="12dp"
                 app:cardBackgroundColor="#FF1A1A1A"
-                app:cardCornerRadius="14dp"
+                app:cardCornerRadius="20dp"
                 app:cardElevation="0dp"
                 app:strokeColor="@color/glow_green"
                 app:strokeWidth="2dp">
@@ -131,7 +131,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginBottom="12dp"
                 app:cardBackgroundColor="#FF1A1A1A"
-                app:cardCornerRadius="14dp"
+                app:cardCornerRadius="20dp"
                 app:cardElevation="0dp"
                 app:strokeWidth="0dp">
 
@@ -198,7 +198,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginBottom="12dp"
                 app:cardBackgroundColor="#FF1A1A1A"
-                app:cardCornerRadius="14dp"
+                app:cardCornerRadius="20dp"
                 app:cardElevation="0dp"
                 app:strokeWidth="0dp">
 
@@ -260,7 +260,7 @@
                             android:textColor="@color/white"
                             android:textSize="15sp" />
 
-                        <androidx.appcompat.widget.SwitchCompat
+                        <com.google.android.material.materialswitch.MaterialSwitch
                             android:id="@+id/alertToggle"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
@@ -268,8 +268,9 @@
 
                     </LinearLayout>
 
-                    <!-- Slider row -->
+                    <!-- Slider row (Flag only) — raw GATT field 0-15, shown as ms ×20 -->
                     <TextView
+                        android:id="@+id/delayLabel"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginBottom="4dp"
@@ -278,6 +279,7 @@
                         android:textSize="13sp" />
 
                     <LinearLayout
+                        android:id="@+id/delayRow"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="horizontal"
@@ -290,16 +292,22 @@
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
                             android:valueFrom="0"
-                            android:valueTo="1000"
+                            android:valueTo="15"
                             android:value="0"
                             android:stepSize="1"
                             app:thumbColor="@color/white"
+                            app:thumbRadius="8dp"
+                            app:trackHeight="6dp"
                             app:trackColorActive="@color/white"
-                            app:trackColorInactive="#FF444444" />
+                            app:trackColorInactive="@color/control_track"
+                            app:haloColor="#33FFFFFF"
+                            app:haloRadius="18dp"
+                            app:tickVisible="false"
+                            app:labelBehavior="gone" />
 
                         <TextView
                             android:id="@+id/delayValue"
-                            android:layout_width="40dp"
+                            android:layout_width="44dp"
                             android:layout_height="wrap_content"
                             android:layout_marginStart="8dp"
                             android:text="0"
@@ -330,7 +338,7 @@
                 android:clickable="true"
                 android:focusable="true"
                 app:cardBackgroundColor="#FF1A1A1A"
-                app:cardCornerRadius="14dp"
+                app:cardCornerRadius="20dp"
                 app:cardElevation="0dp"
                 app:strokeWidth="0dp">
 
@@ -473,7 +481,7 @@
                 android:focusable="true"
                 android:visibility="gone"
                 app:cardBackgroundColor="#FF1A1A1A"
-                app:cardCornerRadius="14dp"
+                app:cardCornerRadius="20dp"
                 app:cardElevation="0dp"
                 app:strokeWidth="0dp">
 
@@ -582,7 +590,7 @@
                 android:focusable="true"
                 android:visibility="gone"
                 app:cardBackgroundColor="#FF1A1A1A"
-                app:cardCornerRadius="14dp"
+                app:cardCornerRadius="20dp"
                 app:cardElevation="0dp"
                 app:strokeWidth="0dp">
 

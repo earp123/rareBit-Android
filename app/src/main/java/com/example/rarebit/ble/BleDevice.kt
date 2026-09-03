@@ -18,6 +18,9 @@ data class BleDevice(
     val deviceType: DeviceType = DeviceType.UNKNOWN,
     val firmwareVersion: String = "",
     val configInterval: Int = -1,
+    val configByte: Int = -1,           // raw device-reported CFG byte (write base)
+    val shortPressEnabled: Boolean = false,
+    val shortPressDelay: Int = -1,      // bits 5-2, ×20 ms (0-15); -1 = not read
     val isDfuOnly: Boolean = false
 ) {
     val address: String get() = bluetoothDevice.address

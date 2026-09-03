@@ -5,7 +5,9 @@
 ### Working
 
 **BLE Scanning**
-- Filters for devices advertising "rareBit" in their name
+- Hardware-level scan filter on the rareBit Config service UUID (bootloaders
+  and third-party devices never reach the callback); name check kept as a
+  second gate
 - Detects device type (FLAG / RECEIVER / RELAY / UNKNOWN) by exact advertised
   name, mirroring iOS `RareBitDeviceType` ("rareBit PRO Flag", "rareBit PRO
   Receiver", "rareBit Relay")
@@ -57,8 +59,6 @@
 
 ### Pending
 
-- Alert toggle and delay slider are display-only — no BLE writes wired yet
-  (slider range also needs the 0–15 × 20 ms firmware encoding)
 - Relay legacy Nordic DFU flow (trigger `0xA8`, bootloader service `1530`,
   manifest + SHA-256 from public releases repo, recovery card) — see parity
   audit P3
@@ -70,6 +70,20 @@
 ---
 
 ## History
+
+### 2026-09-02 — P2 config writes, CFG scan filter, UI unification
+- Config writes wired: Short Press Alert toggle and delay slider write the CFG
+  byte with iOS invariants (device-reported base byte required, only target
+  bits modified, no-op writes skipped, optimistic UI update)
+- Full CFG byte parsed (enable bit0, delay bits5–2, battery bits7–6); controls
+  populate from device state; delay slider is the raw GATT field 0–15 shown as
+  ms ×20, Flag-only (iOS parity)
+- CFG notifications enabled once the initial read queue drains — battery and
+  config changes now stream live
+- Scan filter moved to the Config service UUID at the scanner level
+- UI: device cards pill-shaped (26dp radius + matching glow), detail cards
+  unified at 20dp, Material3 switch, slimmer slider (no ticks/tooltip),
+  stroke width density-correct, new Relay icon from design PNG
 
 ### 2026-08-27 — P1 parity fixes (audit sync)
 - Device typing by exact advertised name; added RELAY type with its own icon
