@@ -1,8 +1,10 @@
 package com.example.rarebit.ui
 
+import android.annotation.SuppressLint
 import android.graphics.Color
 import android.os.Bundle
 import android.view.LayoutInflater
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
@@ -40,6 +42,11 @@ class DeviceDetailFragment : Fragment() {
 
     private enum class ActiveDfu { NONE, RELAY, RESTORE }
 
+    private companion object {
+        const val DEV_HOLD_MS = 10_000L
+        const val DEV_BRANCH_LABEL = "development"
+    }
+
     private var pendingRelease: ReleaseInfo? = null
     private var pendingRelayRelease: ReleaseInfo? = null
     private var versionFetchStarted = false
@@ -54,6 +61,7 @@ class DeviceDetailFragment : Fragment() {
         savedInstanceState: Bundle?
     ): View = inflater.inflate(R.layout.fragment_device_detail, container, false)
 
+    @SuppressLint("ClickableViewAccessibility")
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
@@ -91,6 +99,54 @@ class DeviceDetailFragment : Fragment() {
         val restoreButton: Button = view.findViewById(R.id.restoreButton)
         val restoreProgress: ProgressBar = view.findViewById(R.id.restoreProgress)
         val restoreStatusText: TextView = view.findViewById(R.id.restoreStatusText)
+        val devCard: MaterialCardView = view.findViewById(R.id.devCard)
+        val devStatusText: TextView = view.findViewById(R.id.devStatusText)
+        val devShowDfuButton: Button = view.findViewById(R.id.devShowDfuButton)
+        val devFetchButton: Button = view.findViewById(R.id.devFetchButton)
+
+        // Hidden developer mode: hold the title card for 10s. No visual cue —
+        // the timer silently cancels if the finger lifts or the scroll steals
+        // the gesture (ACTION_CANCEL).
+        val devRevealRunnable = Runnable {
+            if (isAdded) devCard.visibility = View.VISIBLE
+        }
+        titleCard.setOnTouchListener { v, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN ->
+                    v.postDelayed(devRevealRunnable, DEV_HOLD_MS)
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL ->
+                    v.removeCallbacks(devRevealRunnable)
+            }
+            true
+        }
+
+        devShowDfuButton.setOnClickListener {
+            dfuCard.visibility = View.VISIBLE
+            devStatusText.text = "DFU card shown (release firmware)"
+        }
+
+        devFetchButton.setOnClickListener {
+            val device = bleManager.devices.value.firstOrNull { it.address == deviceAddress }
+                ?: return@setOnClickListener
+            devStatusText.text = "Fetching from '$DEV_BRANCH_LABEL'…"
+            viewLifecycleOwner.lifecycleScope.launch {
+                try {
+                    val dev = FirmwareRepository.fetchDevReleaseInfo(
+                        device.deviceType, BuildConfig.GITHUB_PAT
+                    )
+                    if (dev == null) {
+                        devStatusText.text = "No dev release on '$DEV_BRANCH_LABEL' yet"
+                    } else {
+                        pendingRelease = dev
+                        dfuButton.text = "Install dev v${dev.version}"
+                        dfuCard.visibility = View.VISIBLE
+                        devStatusText.text = "Dev v${dev.version} armed — install from the DFU card"
+                    }
+                } catch (e: Exception) {
+                    devStatusText.text = "Dev fetch failed: ${e.message ?: e.javaClass.simpleName}"
+                }
+            }
+        }
 
         // Reset any terminal DFU state left over from a previous session so the
         // stale Success/Error value doesn't immediately trigger navigation in this fragment.

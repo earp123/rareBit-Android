@@ -88,6 +88,10 @@
 - Receiver title card states its firmware personality on connect — "Receiver
   firmware v1.x" (gray) vs "Relay firmware v10.x" (orange); relay/restore
   cards use a new radio-waves glyph instead of the Relay device icon
+- Hidden developer card (10s hold on the detail title card, no visual cue):
+  force-show the DFU card, or fetch a release cut against the firmware repo's
+  `development` branch (matched by target_commitish + tag prefix; returns
+  "not yet" gracefully until one exists) and arm it on the DFU button
 
 ### 2026-08-27 — P1 parity fixes (audit sync)
 - Device typing by exact advertised name; added RELAY type with its own icon

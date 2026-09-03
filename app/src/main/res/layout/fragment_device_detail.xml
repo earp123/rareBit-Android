@@ -705,6 +705,77 @@
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
+            <!-- ── Developer card (hidden; 10s hold on title card) ── -->
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/devCard"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="12dp"
+                android:visibility="gone"
+                app:cardBackgroundColor="#FF1A1A1A"
+                app:cardCornerRadius="20dp"
+                app:cardElevation="0dp"
+                app:strokeColor="#FF444444"
+                app:strokeWidth="1dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginBottom="6dp"
+                        android:text="DEVELOPER"
+                        android:textColor="#FF888888"
+                        android:textSize="11sp"
+                        android:textStyle="bold"
+                        android:letterSpacing="0.12" />
+
+                    <TextView
+                        android:id="@+id/devStatusText"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginBottom="10dp"
+                        android:text="Dev options enabled"
+                        android:textColor="#FF888888"
+                        android:textSize="13sp" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal">
+
+                        <Button
+                            android:id="@+id/devShowDfuButton"
+                            android:layout_width="0dp"
+                            android:layout_height="40dp"
+                            android:layout_weight="1"
+                            android:layout_marginEnd="8dp"
+                            android:text="Show DFU Card"
+                            android:textSize="13sp"
+                            android:textColor="@color/white"
+                            android:backgroundTint="#FF2A2A2A"
+                            style="@style/Widget.Material3.Button" />
+
+                        <Button
+                            android:id="@+id/devFetchButton"
+                            android:layout_width="0dp"
+                            android:layout_height="40dp"
+                            android:layout_weight="1"
+                            android:text="Fetch Dev Firmware"
+                            android:textSize="13sp"
+                            android:textColor="@color/white"
+                            android:backgroundTint="#FF2A2A2A"
+                            style="@style/Widget.Material3.Button" />
+
+                    </LinearLayout>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+
         </LinearLayout>
     </androidx.core.widget.NestedScrollView>
 

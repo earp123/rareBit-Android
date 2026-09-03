@@ -17,6 +17,7 @@ object FirmwareRepository {
 
     private const val RELEASES_URL =
         "https://api.github.com/repos/earp123/rareBit-Flags-Receivers/releases"
+    private const val DEV_BRANCH = "development"
 
     // Exact tags mirror iOS RareBitDeviceType.releaseTag; the prefix is the
     // fallback when tags are misconfigured (same as iOS fetchReleaseWithFallback).
@@ -47,6 +48,32 @@ object FirmwareRepository {
         withContext(Dispatchers.IO) {
             relayCache?.let { return@withContext it }
             findRelease(RELAY_SWAP_SPEC, pat)?.also { relayCache = it }
+        }
+
+    // Developer plumbing: first release cut against the development branch
+    // (target_commitish), matching this device type's tag prefix. Uncached —
+    // dev builds churn. Returns null until such a release exists.
+    suspend fun fetchDevReleaseInfo(deviceType: DeviceType, pat: String): ReleaseInfo? =
+        withContext(Dispatchers.IO) {
+            val spec = TAG_SPECS[deviceType] ?: return@withContext null
+            val json = githubGet(RELEASES_URL, pat, "application/vnd.github+json")
+            val releases = JSONArray(json)
+            for (i in 0 until releases.length()) {
+                val release = releases.getJSONObject(i)
+                if (release.optString("target_commitish") != DEV_BRANCH) continue
+                val tagName = release.getString("tag_name")
+                if (!tagName.startsWith(spec.prefix, ignoreCase = true)) continue
+                val version = parseVersion(tagName) ?: continue
+                val assets = release.getJSONArray("assets")
+                for (j in 0 until assets.length()) {
+                    val asset = assets.getJSONObject(j)
+                    if (asset.getString("name").endsWith(".bin")) {
+                        Log.d("FirmwareRepo", "dev release: $tagName -> $version")
+                        return@withContext ReleaseInfo(version, asset.getString("url"))
+                    }
+                }
+            }
+            null
         }
 
     private fun findRelease(spec: TagSpec, pat: String): ReleaseInfo? {
