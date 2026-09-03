@@ -5,9 +5,10 @@
 ### Working
 
 **BLE Scanning**
-- Hardware-level scan filter on the rareBit Config service UUID (bootloaders
-  and third-party devices never reach the callback); name check kept as a
-  second gate
+- Hardware-level scan filters (OR): Config service UUID + exact device names.
+  Bench finding 2026-09-02: only the Relay advertises the CFG UUID —
+  Flag/Receiver firmware advertises no service UUIDs, so exact-name filters
+  cover them until firmware adds the UUID (same TODO as iOS)
 - Detects device type (FLAG / RECEIVER / RELAY / UNKNOWN) by exact advertised
   name, mirroring iOS `RareBitDeviceType` ("rareBit PRO Flag", "rareBit PRO
   Receiver", "rareBit Relay")
@@ -84,6 +85,9 @@
 - UI: device cards pill-shaped (26dp radius + matching glow), detail cards
   unified at 20dp, Material3 switch, slimmer slider (no ticks/tooltip),
   stroke width density-correct, new Relay icon from design PNG
+- Receiver title card states its firmware personality on connect — "Receiver
+  firmware v1.x" (gray) vs "Relay firmware v10.x" (orange); relay/restore
+  cards use a new radio-waves glyph instead of the Relay device icon
 
 ### 2026-08-27 — P1 parity fixes (audit sync)
 - Device typing by exact advertised name; added RELAY type with its own icon

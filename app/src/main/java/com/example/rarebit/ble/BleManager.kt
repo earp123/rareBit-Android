@@ -96,10 +96,10 @@ class BleManager(context: Context) {
             val existing = deviceMap[address]
             // Exact advertised names, mirroring iOS RareBitDeviceType.from()
             val deviceType = when (rawName) {
-                "rareBit PRO Flag"     -> DeviceType.FLAG
-                "rareBit PRO Receiver" -> DeviceType.RECEIVER
-                "rareBit Relay"        -> DeviceType.RELAY
-                else                   -> DeviceType.UNKNOWN
+                NAME_FLAG     -> DeviceType.FLAG
+                NAME_RECEIVER -> DeviceType.RECEIVER
+                NAME_RELAY    -> DeviceType.RELAY
+                else          -> DeviceType.UNKNOWN
             }
             deviceMap[address] = existing?.copy(rssi = result.rssi)
                 ?: BleDevice(bluetoothDevice = result.device, name = name, rssi = result.rssi, deviceType = deviceType)
@@ -117,12 +117,15 @@ class BleManager(context: Context) {
         val settings = ScanSettings.Builder()
             .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
             .build()
-        // Only rareBit devices advertise the config service — hardware-level
-        // filter keeps bootloaders / third-party devices out of the callback.
+        // Hardware-level filters (OR semantics). Flag/Receiver firmware doesn't
+        // advertise any service UUIDs yet, so exact names cover them; the CFG
+        // service UUID covers the Relay (and any future firmware that
+        // advertises it). Bootloaders / third-party devices match neither.
         val filters = listOf(
-            ScanFilter.Builder()
-                .setServiceUuid(ParcelUuid(CFG_SERVICE_UUID))
-                .build()
+            ScanFilter.Builder().setServiceUuid(ParcelUuid(CFG_SERVICE_UUID)).build(),
+            ScanFilter.Builder().setDeviceName(NAME_FLAG).build(),
+            ScanFilter.Builder().setDeviceName(NAME_RECEIVER).build(),
+            ScanFilter.Builder().setDeviceName(NAME_RELAY).build()
         )
         scanner?.startScan(filters, settings, scanCallback)
         scope.launch {
@@ -443,6 +446,11 @@ class BleManager(context: Context) {
     // ── GATT name tables ──────────────────────────────────────────────────────
 
     companion object {
+        // Exact advertised names (match iOS RareBitDeviceType raw values)
+        const val NAME_FLAG     = "rareBit PRO Flag"
+        const val NAME_RECEIVER = "rareBit PRO Receiver"
+        const val NAME_RELAY    = "rareBit Relay"
+
         val BATTERY_LEVEL_UUID: UUID = UUID.fromString("00002A19-0000-1000-8000-00805F9B34FB")
         val CLIENT_CHAR_CONFIG_UUID: UUID = UUID.fromString("00002902-0000-1000-8000-00805F9B34FB")
 

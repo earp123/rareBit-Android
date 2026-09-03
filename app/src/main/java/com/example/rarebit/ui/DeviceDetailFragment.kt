@@ -59,6 +59,7 @@ class DeviceDetailFragment : Fragment() {
 
         val titleCard: MaterialCardView = view.findViewById(R.id.titleCard)
         val titleDeviceName: TextView = view.findViewById(R.id.titleDeviceName)
+        val titleFirmwareLabel: TextView = view.findViewById(R.id.titleFirmwareLabel)
         val titleDeviceIcon: ImageView = view.findViewById(R.id.titleDeviceIcon)
         val dfuCard: MaterialCardView = view.findViewById(R.id.dfuCard)
         val settingsCard: MaterialCardView = view.findViewById(R.id.settingsCard)
@@ -354,6 +355,23 @@ class DeviceDetailFragment : Fragment() {
                 if (device == null) return@collectLatest
 
                 titleDeviceName.text = device.name
+
+                // Receivers run either Receiver firmware (v1.x) or Relay
+                // firmware (v10.x) — say which, right on the title card.
+                if (device.deviceType == DeviceType.RECEIVER && device.firmwareVersion.isNotEmpty()) {
+                    val relayFw = !FirmwareRepository.isNewerVersion("10.0", device.firmwareVersion)
+                    titleFirmwareLabel.text = if (relayFw)
+                        "Relay firmware v${device.firmwareVersion}"
+                    else
+                        "Receiver firmware v${device.firmwareVersion}"
+                    titleFirmwareLabel.setTextColor(
+                        if (relayFw) Color.parseColor("#FFFF8C00") else Color.parseColor("#FF888888")
+                    )
+                    titleFirmwareLabel.visibility = View.VISIBLE
+                } else {
+                    titleFirmwareLabel.visibility = View.GONE
+                }
+
                 titleDeviceIcon.setImageResource(
                     when (device.deviceType) {
                         DeviceType.FLAG     -> R.drawable.ic_device_flag
