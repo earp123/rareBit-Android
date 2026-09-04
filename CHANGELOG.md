@@ -77,6 +77,33 @@
 
 ## History
 
+### 2026-09-04 — Config persistence findings (bench, Flag v2.0.0-dev.1)
+Config values reset on Flag power cycles. Diagnosed with new `BleCfg` logcat
+tracing (kept in the app): writes succeed (GATT status 0) and the Flag echoes
+the new byte (0xE9) via notify, but after a power cycle the initial CFG read
+is factory default (0x00, then 0xC0 once battery bits apply). **The app reads
+accurately — the device loses the value.**
+
+Root cause (firmware, `common/src/config_svc.c` + `settings_guard.c` on
+`development`): the settings region (0xa000–0xc000, carved from MCUboot
+padding) is fprotect-locked by fielded factory bootloaders, so
+`cfg_persist_enabled=false` and the config byte stays volatile; `sys_poweroff`
+then wipes it. The firmware's sanctioned fallback assumes *"the mobile app
+re-writes it on every connect"* — neither the Android nor the iOS app
+implements that today.
+
+Suggestions for the PM re-investigation:
+1. Field persistence needs firmware storage the fielded bootloader doesn't
+   lock — e.g. a settings page in app-flash territory (DFU proves it's
+   writable; pick a page firmware swaps don't erase), or a UICR customer-word
+   journal (~30 writes lifetime, fine for set-once prefs).
+2. Either way, both apps should implement the connect-time re-apply (cache
+   last user-set bits 0–5 per device, write only when the device's byte
+   differs — the existing no-op write guard makes it free on persisting
+   units). Covers the already-fielded volatile cohort.
+3. iOS also still needs the prerelease guard on its stable firmware fetch
+   (see 2026-09-04 entry below).
+
 ### 2026-09-04 — Prerelease guard on the stable firmware channel
 - Bench-validated the dev channel: hidden dev card fetched
   `PRO_FLAG_v2.0.0-dev.1` from the `development` branch and flashed a Flag to

@@ -238,6 +238,14 @@ class BleManager(context: Context) {
 
         // Note: write/descriptor callbacks must NOT touch the read queue — it is
         // advanced only by handleCharRead, one entry per completed read.
+        override fun onCharacteristicWrite(
+            gatt: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic,
+            status: Int
+        ) {
+            val ok = status == BluetoothGatt.GATT_SUCCESS
+            android.util.Log.i("BleCfg", "WRITE_DONE(${gatt.device.address}) ch=${characteristic.uuid} status=$status${if (ok) "" else " ❌"}")
+        }
     }
 
     private fun handleGattDisconnect(gatt: BluetoothGatt) {
@@ -290,6 +298,8 @@ class BleManager(context: Context) {
     // CFG byte layout (iOS parity): bits7-6 battery, bits5-2 delay ×20ms,
     // bit0 short-press enable
     private fun applyConfigByte(address: String, byte: Int) {
+        android.util.Log.i("BleCfg", "CFG($address) = 0x%02X  shortPress=%b delay=%d batt=%d".format(
+            byte, (byte and 0x01) != 0, (byte shr 2) and 0x0F, byte shr 6))
         updateDevice(address) {
             it.copy(
                 configByte = byte,
@@ -320,6 +330,7 @@ class BleManager(context: Context) {
         if (base < 0) return  // no device-reported byte yet — never write 0x00
         val newByte = transform(base) and 0xFF
         if (newByte == base) return
+        android.util.Log.i("BleCfg", "WRITE($address) base=0x%02X new=0x%02X".format(base, newByte))
         applyConfigByte(address, newByte)
         writeCharacteristic(address, CFG_SERVICE_UUID, CFG_CHAR_UUID, byteArrayOf(newByte.toByte()))
     }
