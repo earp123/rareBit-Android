@@ -39,6 +39,11 @@
 **Firmware / DFU**
 - Exact release tags per device type (`PRO_FLAG_v1.9.0`, `PRO_RX_v1.8.0`,
   `RXRLY_v10.0` — same constants as iOS) with tag-prefix fallback
+- Stable fetch skips prereleases: dev builds share the stable tag prefixes
+  (`PRO_FLAG_v2.0.0-dev.1`) and are newest-first, so without the guard a stale
+  exact-tag constant would hand customers a dev build via the prefix fallback.
+  ⚠️ iOS `FirmwareService.fetchLatestRelease` has the same fallback pattern and
+  no guard — port this once the dev tagging convention is settled
 - Version regex handles both 2-part (`10.0`) and 3-part (`1.9.0`) tag formats
 - Release info cached in-memory per session
 - Update detection compares the release version against the device's FW-version
@@ -71,6 +76,13 @@
 ---
 
 ## History
+
+### 2026-09-04 — Prerelease guard on the stable firmware channel
+- Bench-validated the dev channel: hidden dev card fetched
+  `PRO_FLAG_v2.0.0-dev.1` from the `development` branch and flashed a Flag to
+  v2.0 over SMP successfully
+- Guarded `findRelease` (stable channel) against prereleases — see the
+  Firmware / DFU note above; iOS needs the matching guard
 
 ### 2026-09-02 — P2 config writes, CFG scan filter, UI unification
 - Config writes wired: Short Press Alert toggle and delay slider write the CFG

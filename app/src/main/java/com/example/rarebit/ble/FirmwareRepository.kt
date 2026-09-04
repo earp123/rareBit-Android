@@ -85,6 +85,11 @@ object FirmwareRepository {
         var prefixed: JSONObject? = null
         for (i in 0 until releases.length()) {
             val release = releases.getJSONObject(i)
+            // Stable channel only: dev builds are prereleases sharing the same
+            // tag prefixes (e.g. PRO_FLAG_v2.0.0-dev.1) and are newest-first —
+            // without this guard a stale exact tag would hand customers a dev
+            // build via the prefix fallback. Dev fetch is fetchDevReleaseInfo.
+            if (release.optBoolean("prerelease")) continue
             val tagName = release.getString("tag_name")
             if (tagName == spec.exact) { exact = release; break }
             if (prefixed == null && tagName.startsWith(spec.prefix, ignoreCase = true)) {
