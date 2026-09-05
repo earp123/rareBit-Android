@@ -4,6 +4,7 @@ import android.Manifest
 import android.bluetooth.BluetoothAdapter
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -19,6 +20,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.navigation.fragment.findNavController
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import com.example.rarebit.MainActivity
 import com.example.rarebit.R
 import com.example.rarebit.ble.BleDevice
@@ -27,10 +29,18 @@ import kotlinx.coroutines.launch
 
 class ScanListFragment : Fragment() {
 
+    private companion object {
+        // Logo sits 132dp from the top and the list starts below it; these pull
+        // the spinner back up over the logo.
+        const val SPINNER_START_DP = -140
+        const val SPINNER_END_DP = -56
+    }
+
     private val bleManager get() = (requireActivity() as MainActivity).bleManager
 
     private lateinit var recyclerView: RecyclerView
     private lateinit var scanButton: Button
+    private lateinit var swipeRefresh: SwipeRefreshLayout
     private lateinit var adapter: DeviceCardAdapter
 
     private val enableBtLauncher = registerForActivityResult(
@@ -68,6 +78,20 @@ class ScanListFragment : Fragment() {
 
         recyclerView = view.findViewById(R.id.recyclerView)
         scanButton = view.findViewById(R.id.scanButton)
+        swipeRefresh = view.findViewById(R.id.swipeRefresh)
+
+        // Pull-to-scan: same action as the Find Devices button
+        swipeRefresh.setColorSchemeColors(Color.WHITE)
+        swipeRefresh.setProgressBackgroundColorSchemeColor(Color.parseColor("#1A1A1A"))
+        // Land the spinner up in the logo zone rather than at the list edge.
+        // Offsets are dp relative to the SwipeRefreshLayout top, so they're
+        // negative — the root has clipChildren=false to let it draw up there.
+        swipeRefresh.setProgressViewOffset(false, SPINNER_START_DP, SPINNER_END_DP)
+        swipeRefresh.setOnRefreshListener {
+            refreshScan()
+            // BT-off / permission paths never start a scan — don't leave it spinning
+            if (!bleManager.isScanning.value) swipeRefresh.isRefreshing = false
+        }
         val optionsButton: Button = view.findViewById(R.id.optionsButton)
         optionsButton.setOnClickListener { anchor ->
             val menu = PopupMenu(requireContext(), anchor)
@@ -125,6 +149,9 @@ class ScanListFragment : Fragment() {
                     getString(R.string.stop_scanning)
                 else
                     getString(R.string.find_devices)
+                // Spinner tracks the scan either way it was started, and clears
+                // when the 10s window closes or the user stops it.
+                swipeRefresh.isRefreshing = scanning
             }
         }
     }

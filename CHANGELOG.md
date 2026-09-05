@@ -55,6 +55,10 @@
 - Relay-flash and restore buttons confirm via dialog before flashing
 - On success: clears the device's update flag, navigates back to scan list
 
+**Scan List**
+- Pull-to-scan: drag the list down and release to run the Find Devices action;
+  spinner sits over the logo and tracks real scan state
+
 **Device Card (scan list)**
 - White card / black text for pre-connect; dark card / colored glow for connected
 - RSSI shown as animated ProgressBar at the card bottom, inset 10dp from sides and 8dp from bottom edge
@@ -76,6 +80,31 @@
 ---
 
 ## History
+
+### 2026-09-04 — Pull-to-scan
+- Pull the device list down and release to run the same action as Find Devices
+  (clears disconnected devices, checks BT/permissions, scans). Adds
+  `androidx.swiperefreshlayout:1.1.0`.
+- Spinner is offset up into the logo area (`setProgressViewOffset`, negative dp;
+  root `clipChildren=false`) rather than sitting at the list edge.
+- Spinner tracks real scan state, so it also shows for button-started scans and
+  clears when the 10s window closes; BT-off / permission paths drop it
+  immediately instead of spinning forever.
+
+### 2026-09-04 — Connect-time config re-apply (PM decision)
+Safety net for units power-cycled before firmware persistence reaches them
+(firmware side: `rareBit-Flags-Receivers/docs/config-persistence-in-slot.md`,
+settings pages inside slot 0).
+
+- User-set CFG bits 0–5 cached per device address (SharedPreferences
+  `device_config`); bits 6–7 are device-owned battery and never cached.
+- On connect, after the CCC descriptor write lands (GATT idle), the cached
+  bits are compared against the device's reported byte and written back only
+  when they differ — a no-op once firmware persistence works, and on devices
+  this phone never configured.
+- Falls back to an immediate re-apply if the CFG characteristic exposes no CCC
+  descriptor (no `onDescriptorWrite` to ride).
+- `BleCfg` logs `REAPPLY(...)` with device/cached/restored bytes for bench work.
 
 ### 2026-09-04 — Config persistence findings (bench, Flag v2.0.0-dev.1)
 Config values reset on Flag power cycles. Diagnosed with new `BleCfg` logcat

@@ -238,6 +238,18 @@ class BleManager(context: Context) {
 
         // Note: write/descriptor callbacks must NOT touch the read queue — it is
         // advanced only by handleCharRead, one entry per completed read.
+        override fun onDescriptorWrite(
+            gatt: BluetoothGatt,
+            descriptor: BluetoothGattDescriptor,
+            status: Int
+        ) {
+            // CCC write is the last queued GATT op of the connect sequence, so
+            // the link is idle — safe to issue the config re-apply here.
+            if (descriptor.characteristic?.uuid == CFG_CHAR_UUID) {
+                reapplyCachedConfig(gatt.device.address)
+            }
+        }
+
         override fun onCharacteristicWrite(
             gatt: BluetoothGatt,
             characteristic: BluetoothGattCharacteristic,
@@ -273,7 +285,11 @@ class BleManager(context: Context) {
         } else if (cfgNotifySubscribed.add(address)) {
             // Read queue drained — the GATT is idle, safe to write the CCC
             // descriptor. Live CFG updates (battery, config echoes) from here on.
-            setNotification(address, CFG_SERVICE_UUID, CFG_CHAR_UUID, true)
+            // Re-apply normally rides onDescriptorWrite; if there's no CCC
+            // descriptor to write, the link is already idle so run it now.
+            if (!setNotification(address, CFG_SERVICE_UUID, CFG_CHAR_UUID, true)) {
+                reapplyCachedConfig(address)
+            }
         }
     }
 
@@ -331,8 +347,38 @@ class BleManager(context: Context) {
         val newByte = transform(base) and 0xFF
         if (newByte == base) return
         android.util.Log.i("BleCfg", "WRITE($address) base=0x%02X new=0x%02X".format(base, newByte))
+        cacheConfigBits(address, newByte)
         applyConfigByte(address, newByte)
         writeCharacteristic(address, CFG_SERVICE_UUID, CFG_CHAR_UUID, byteArrayOf(newByte.toByte()))
+    }
+
+    // ── CONNECT-TIME RE-APPLY ─────────────────────────────────────────────────
+    // Fielded units run volatile config (their factory bootloader write-locks
+    // the firmware's settings region), so a power cycle reverts them to factory
+    // default. Cache the user's bits 0-5 per device and restore them on connect.
+    // No-op once firmware persistence lands — the bytes already match.
+
+    private val configPrefs
+        get() = appContext.getSharedPreferences("device_config", Context.MODE_PRIVATE)
+
+    private fun cacheConfigBits(address: String, byte: Int) {
+        configPrefs.edit().putInt("cfg_$address", byte and CFG_CLIENT_MASK).apply()
+    }
+
+    private fun reapplyCachedConfig(address: String) {
+        val cached = configPrefs.getInt("cfg_$address", -1)
+        if (cached < 0) return                       // nothing set on this phone yet
+        val current = deviceMap[address]?.configByte ?: return
+        if (current < 0) return
+        if ((current and CFG_CLIENT_MASK) == cached) {
+            android.util.Log.i("BleCfg", "REAPPLY($address) device already at 0x%02X — no write".format(cached))
+            return
+        }
+        val restored = (current and CFG_CLIENT_MASK.inv() and 0xFF) or cached
+        android.util.Log.i("BleCfg", "REAPPLY($address) device=0x%02X cached=0x%02X -> 0x%02X".format(
+            current, cached, restored))
+        applyConfigByte(address, restored)
+        writeCharacteristic(address, CFG_SERVICE_UUID, CFG_CHAR_UUID, byteArrayOf(restored.toByte()))
     }
 
     fun connect(device: BleDevice) {
@@ -385,11 +431,12 @@ class BleManager(context: Context) {
         }
     }
 
-    fun setNotification(address: String, serviceUuid: UUID, charUuid: UUID, enable: Boolean) {
-        val gatt = activeGatts[address] ?: return
-        val char = gatt.getService(serviceUuid)?.getCharacteristic(charUuid) ?: return
+    /** @return true if a descriptor write was issued (onDescriptorWrite will fire). */
+    fun setNotification(address: String, serviceUuid: UUID, charUuid: UUID, enable: Boolean): Boolean {
+        val gatt = activeGatts[address] ?: return false
+        val char = gatt.getService(serviceUuid)?.getCharacteristic(charUuid) ?: return false
         gatt.setCharacteristicNotification(char, enable)
-        val descriptor = char.getDescriptor(CLIENT_CHAR_CONFIG_UUID) ?: return
+        val descriptor = char.getDescriptor(CLIENT_CHAR_CONFIG_UUID) ?: return false
         val value = if (enable) BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
                     else BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -400,6 +447,7 @@ class BleManager(context: Context) {
             @Suppress("DEPRECATION")
             gatt.writeDescriptor(descriptor)
         }
+        return true
     }
 
     fun setHasUpdate(address: String, hasUpdate: Boolean) {
@@ -457,6 +505,11 @@ class BleManager(context: Context) {
     // ── GATT name tables ──────────────────────────────────────────────────────
 
     companion object {
+        // Client-owned CFG bits (0-5: short-press enable + delay). Bits 6-7 are
+        // the device-owned battery level — never cached, never written back.
+        // Mirrors CFG_PERSIST_MASK in firmware config_svc.c.
+        const val CFG_CLIENT_MASK = 0x3F
+
         // Exact advertised names (match iOS RareBitDeviceType raw values)
         const val NAME_FLAG     = "rareBit PRO Flag"
         const val NAME_RECEIVER = "rareBit PRO Receiver"
