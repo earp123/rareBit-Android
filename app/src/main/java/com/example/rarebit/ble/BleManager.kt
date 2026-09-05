@@ -257,6 +257,9 @@ class BleManager(context: Context) {
         ) {
             val ok = status == BluetoothGatt.GATT_SUCCESS
             android.util.Log.i("BleCfg", "WRITE_DONE(${gatt.device.address}) ch=${characteristic.uuid} status=$status${if (ok) "" else " ❌"}")
+            if (ok && characteristic.uuid == CFG_CHAR_UUID) {
+                cacheConfirmedWrite(gatt.device.address)
+            }
         }
     }
 
@@ -347,7 +350,7 @@ class BleManager(context: Context) {
         val newByte = transform(base) and 0xFF
         if (newByte == base) return
         android.util.Log.i("BleCfg", "WRITE($address) base=0x%02X new=0x%02X".format(base, newByte))
-        cacheConfigBits(address, newByte)
+        pendingUserWrites[address] = newByte
         applyConfigByte(address, newByte)
         writeCharacteristic(address, CFG_SERVICE_UUID, CFG_CHAR_UUID, byteArrayOf(newByte.toByte()))
     }
@@ -361,22 +364,33 @@ class BleManager(context: Context) {
     private val configPrefs
         get() = appContext.getSharedPreferences("device_config", Context.MODE_PRIVATE)
 
-    private fun cacheConfigBits(address: String, byte: Int) {
+    // Written by a user action, awaiting GATT confirmation. Only confirmed user
+    // writes are cached — caching a device read would store a volatile unit's
+    // 0x00 and make the whole mechanism a no-op.
+    private val pendingUserWrites = LinkedHashMap<String, Int>()
+
+    private fun cacheConfirmedWrite(address: String) {
+        val byte = pendingUserWrites.remove(address) ?: return
         configPrefs.edit().putInt("cfg_$address", byte and CFG_CLIENT_MASK).apply()
     }
 
+    // Restore only when the device looks factory-reset (client bits all zero).
+    // Deliberately narrower than "write when they differ": a config set from a
+    // second phone must not be silently overwritten by this one's cache.
     private fun reapplyCachedConfig(address: String) {
-        val cached = configPrefs.getInt("cfg_$address", -1)
-        if (cached < 0) return                       // nothing set on this phone yet
+        val cached = configPrefs.getInt("cfg_$address", 0)
         val current = deviceMap[address]?.configByte ?: return
         if (current < 0) return
-        if ((current and CFG_CLIENT_MASK) == cached) {
-            android.util.Log.i("BleCfg", "REAPPLY($address) device already at 0x%02X — no write".format(cached))
+        if (cached == 0) {
+            android.util.Log.i("BleCfg", "reapply skip (no cache) $address")
             return
         }
-        val restored = (current and CFG_CLIENT_MASK.inv() and 0xFF) or cached
-        android.util.Log.i("BleCfg", "REAPPLY($address) device=0x%02X cached=0x%02X -> 0x%02X".format(
-            current, cached, restored))
+        if ((current and CFG_CLIENT_MASK) != 0) {
+            android.util.Log.i("BleCfg", "reapply skip (persisted) $address 0x%02X".format(current))
+            return
+        }
+        val restored = (current and CFG_BATTERY_MASK) or cached
+        android.util.Log.i("BleCfg", "reapply $address 0x%02X -> 0x%02X".format(current, restored))
         applyConfigByte(address, restored)
         writeCharacteristic(address, CFG_SERVICE_UUID, CFG_CHAR_UUID, byteArrayOf(restored.toByte()))
     }
@@ -509,6 +523,7 @@ class BleManager(context: Context) {
         // the device-owned battery level — never cached, never written back.
         // Mirrors CFG_PERSIST_MASK in firmware config_svc.c.
         const val CFG_CLIENT_MASK = 0x3F
+        const val CFG_BATTERY_MASK = 0xC0
 
         // Exact advertised names (match iOS RareBitDeviceType raw values)
         const val NAME_FLAG     = "rareBit PRO Flag"

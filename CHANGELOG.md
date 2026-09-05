@@ -55,6 +55,13 @@
 - Relay-flash and restore buttons confirm via dialog before flashing
 - On success: clears the device's update flag, navigates back to scan list
 
+**Config re-apply (safety net)**
+- Confirmed user CFG writes cache bits 0–5 per device address; on connect, if
+  the device reports client bits 0x00 (factory-reset) and a cache exists, the
+  value is written back. Firmware-side persistence is the primary fix — this
+  only covers units power-cycled before that firmware reaches them
+  (`docs/config-reapply-on-connect.md`)
+
 **Scan List**
 - Pull-to-scan: drag the list down and release to run the Find Devices action;
   spinner sits over the logo and tracks real scan state
@@ -96,15 +103,21 @@ Safety net for units power-cycled before firmware persistence reaches them
 (firmware side: `rareBit-Flags-Receivers/docs/config-persistence-in-slot.md`,
 settings pages inside slot 0).
 
-- User-set CFG bits 0–5 cached per device address (SharedPreferences
-  `device_config`); bits 6–7 are device-owned battery and never cached.
-- On connect, after the CCC descriptor write lands (GATT idle), the cached
-  bits are compared against the device's reported byte and written back only
-  when they differ — a no-op once firmware persistence works, and on devices
-  this phone never configured.
-- Falls back to an immediate re-apply if the CFG characteristic exposes no CCC
-  descriptor (no `onDescriptorWrite` to ride).
-- `BleCfg` logs `REAPPLY(...)` with device/cached/restored bytes for bench work.
+Implemented per `docs/config-reapply-on-connect.md`.
+
+- Cached only from CFG writes confirmed with GATT status 0 (never from a device
+  read — caching a volatile unit's 0x00 would make the mechanism a no-op).
+  Bits 0–5 only, keyed by BLE address in SharedPreferences `device_config`;
+  bits 6–7 are device-owned battery and are preserved from the live byte.
+- Re-applied on connect only when the device reports client bits == 0x00, so a
+  config set from a second phone is not overwritten by this one's cache.
+- Sequencing note: the doc says re-apply before enabling notifications, but
+  Android allows one GATT op in flight, so a write issued there would drop the
+  CCC descriptor write. Re-apply instead rides `onDescriptorWrite` (link
+  provably idle), falling back to an immediate call when the characteristic
+  exposes no CCC descriptor. Same observable behavior.
+- `BleCfg` logs `reapply <addr> 0x.. -> 0x..` / `reapply skip (persisted)` /
+  `reapply skip (no cache)`.
 
 ### 2026-09-04 — Config persistence findings (bench, Flag v2.0.0-dev.1)
 Config values reset on Flag power cycles. Diagnosed with new `BleCfg` logcat
