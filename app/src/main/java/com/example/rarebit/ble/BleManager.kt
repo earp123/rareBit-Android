@@ -84,11 +84,23 @@ class BleManager(context: Context) {
     private val connectJobs  = LinkedHashMap<String, Job>()
     private val deviceMap    = LinkedHashMap<String, BleDevice>()
     private val cfgNotifySubscribed = HashSet<String>()
+    private val relaySkipLogged = HashSet<String>()   // one skip line per address per scan
 
     // ── SCAN ──────────────────────────────────────────────────────────────────
 
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
+            // The watch-facing Relay service is for smartwatches only — an
+            // undocked Relay/RXRLY matches the name filter, and a tap would
+            // connect the phone to that service. Drop those advertisements.
+            val advServices = result.scanRecord?.serviceUuids
+            if (RELAY_SERVICE_UUID != null &&
+                advServices?.any { it.uuid == RELAY_SERVICE_UUID } == true) {
+                if (relaySkipLogged.add(result.device.address)) {
+                    android.util.Log.i("BleScan", "skip ${result.device.address} relay-service adv")
+                }
+                return
+            }
             val rawName = result.scanRecord?.deviceName ?: result.device.name ?: return
             if (!rawName.contains("rareBit", ignoreCase = true)) return
             val name = rawName.replace("rareBit", "", ignoreCase = true).trim()
@@ -114,6 +126,7 @@ class BleManager(context: Context) {
     fun startScan() {
         if (_isScanning.value) return
         _isScanning.value = true
+        relaySkipLogged.clear()
         val settings = ScanSettings.Builder()
             .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
             .build()
@@ -187,7 +200,8 @@ class BleManager(context: Context) {
                 svc.characteristics.forEach { char ->
                     val autoRead = char.uuid == BATTERY_LEVEL_UUID ||
                                    char.uuid == FW_CHAR_UUID ||
-                                   char.uuid == CFG_CHAR_UUID
+                                   char.uuid == CFG_CHAR_UUID ||
+                                   char.uuid == BATT_DIAG_CHAR_UUID
                     val readable = char.properties and BluetoothGattCharacteristic.PROPERTY_READ != 0
                     if (autoRead && readable) queue.addLast(char)
                 }
@@ -310,7 +324,20 @@ class BleManager(context: Context) {
                 val version = "${(b shr 4)}.${b and 0x0F}"
                 updateDevice(address) { it.copy(firmwareVersion = version) }
             }
-            CFG_CHAR_UUID -> applyConfigByte(address, value[0].toInt() and 0xFF)
+            CFG_CHAR_UUID -> {
+                applyConfigByte(address, value[0].toInt() and 0xFF)
+                // Battery bits just changed — refresh the diagnostic. Skipped
+                // when the connect-time read queue is still draining; the next
+                // notification picks it up.
+                if (readQueues[address].isNullOrEmpty()) readBatteryDiag(address)
+            }
+            BATT_DIAG_CHAR_UUID -> BatteryDiag.parse(value)?.let { d ->
+                android.util.Log.i("BleBatt", "diag(%s) mv=%d err=%d lvl=%d flags=0x%02X n=%d".format(
+                    address, d.mv, d.errno, d.level,
+                    (if (d.docked) 1 else 0) or (if (d.statHigh) 2 else 0) or (if (d.senseFault) 4 else 0),
+                    d.count))
+                updateDevice(address) { it.copy(batteryDiag = d) }
+            }
         }
     }
 
@@ -327,6 +354,11 @@ class BleManager(context: Context) {
                 shortPressEnabled = (byte and 0x01) != 0
             )
         }
+    }
+
+    private fun readBatteryDiag(address: String) {
+        val uuid = BATT_DIAG_CHAR_UUID ?: return
+        readCharacteristic(address, CFG_SERVICE_UUID, uuid)
     }
 
     // ── CONFIG WRITES ─────────────────────────────────────────────────────────
@@ -541,6 +573,16 @@ class BleManager(context: Context) {
         // SMP Service (MCUboot DFU)
         val SMP_SERVICE_UUID: UUID = UUID.fromString(BuildConfig.BLE_SMP_SERVICE_UUID)
 
+        // Battery diagnostic (Flag/Receiver >= 2.0). Null when unconfigured —
+        // absence is the normal case and must change nothing.
+        val BATT_DIAG_CHAR_UUID: UUID? = optionalUuid(BuildConfig.BLE_BATT_DIAG_CHAR_UUID)
+
+        // Watch-facing Relay service. Phones must never connect to it.
+        val RELAY_SERVICE_UUID: UUID? = optionalUuid(BuildConfig.BLE_RELAY_SERVICE_UUID)
+
+        private fun optionalUuid(value: String): UUID? =
+            value.takeIf { it.isNotBlank() }?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+
         private val SERVICE_NAMES = mapOf(
             "0000180f-0000-1000-8000-00805f9b34fb" to "Battery Service",
             "0000180a-0000-1000-8000-00805f9b34fb" to "Device Information",
@@ -563,7 +605,8 @@ class BleManager(context: Context) {
             "00002a27-0000-1000-8000-00805f9b34fb" to "Hardware Revision",
             "00002a28-0000-1000-8000-00805f9b34fb" to "Software Revision",
             BuildConfig.BLE_CFG_CHAR_UUID.lowercase() to "Config",
-            BuildConfig.BLE_FW_CHAR_UUID.lowercase() to "Firmware Version"
+            BuildConfig.BLE_FW_CHAR_UUID.lowercase() to "Firmware Version",
+            BuildConfig.BLE_BATT_DIAG_CHAR_UUID.lowercase() to "Battery Diagnostic"
         )
 
         fun knownServiceName(uuid: UUID): String =

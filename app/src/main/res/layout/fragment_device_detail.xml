@@ -420,6 +420,28 @@
                         android:layout_marginTop="12dp"
                         android:visibility="gone">
 
+                        <!-- Battery diagnostic (firmware >= 2.0 only) -->
+                        <TextView
+                            android:id="@+id/batteryDiagLabel"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="Battery diagnostic"
+                            android:textColor="@color/white"
+                            android:textSize="13sp"
+                            android:textStyle="bold"
+                            android:layout_marginBottom="4dp"
+                            android:visibility="gone" />
+
+                        <TextView
+                            android:id="@+id/batteryDiagValue"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginBottom="12dp"
+                            android:textColor="#FFB0B0B0"
+                            android:textSize="13sp"
+                            android:lineSpacingMultiplier="1.4"
+                            android:visibility="gone" />
+
                         <TextView
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"

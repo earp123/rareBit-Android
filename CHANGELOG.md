@@ -28,6 +28,11 @@
 - Battery level: raw percentage, falls back to config interval label
 - Glow color is battery-only (unknown = Yellow, matching iOS); updates show as
   the UPDATE! badge, wired to the release check
+- Battery diagnostic char (`23220005-…`, Flag/Receiver ≥ 2.0, read-only,
+  9 bytes LE): `0–1` raw ADC · `2–3` mV (`-1` = read failed) · `4–5` errno ·
+  `6` graded level · `7` bit0 docked / bit1 STAT high / bit2 sense fault ·
+  `8` sample counter. Absent on 1.9/1.8/10.0 and the Relay — absence changes
+  nothing
 
 **Device Detail UI**
 - Loading overlay ("Connecting…" → "Checking for updates…") before content reveals
@@ -62,9 +67,19 @@
   only covers units power-cycled before that firmware reaches them
   (`docs/config-reapply-on-connect.md`)
 
+**Battery display**
+- Sense fault → "SENSE FAULT" (Yellow); failed read / non-zero errno →
+  "UNAVAILABLE" (Yellow); otherwise the existing CFG-bits path. A faulted unit
+  reports LOW forever, so this stops the app showing an untrue red glow
+- Diagnostic detail line on the expandable Info card when the characteristic
+  is present; never feeds CFG writes or the re-apply cache
+
 **Scan List**
 - Pull-to-scan: drag the list down and release to run the Find Devices action;
   spinner sits over the logo and tracks real scan state
+- Advertisements carrying the watch-facing Relay service (`33210001-…`) are
+  dropped — that service is for smartwatches only and an undocked Relay would
+  otherwise match the name filter
 
 **Device Card (scan list)**
 - White card / black text for pre-connect; dark card / colored glow for connected
@@ -83,10 +98,34 @@
 - "No firmware URL" error shown in DFU status text if fetch failed — informational only, no retry button
 - No connect watchdog / BT-off handling; no post-DFU reconnect + version
   confirm — see parity audit P4
+- Scan filter Phase 2 (`docs/scan-filter-consolidation.md`): drop the three
+  name filters for CFG-UUID-only. **Gated** on firmware 2.0 in production *and*
+  the fielded units updated — pre-2.0 units would otherwise become invisible
+  and un-updatable
 
 ---
 
 ## History
+
+### 2026-09-08 — Battery diagnostic + relay-service scan reject
+Both per task docs (`docs/battery-diagnostic.md`,
+`docs/scan-filter-consolidation.md`); iOS twins exist for each.
+
+- New read-only battery diagnostic characteristic parsed into `BatteryDiag`
+  (nullable — `null` is the normal case on pre-2.0 units and the Relay). Read
+  with the connect-time queue and re-read on every CFG notification, skipping
+  while a GATT op is in flight (the next notification catches it).
+- Battery label/glow precedence: sense fault → SENSE FAULT/Yellow; failed read
+  or errno → UNAVAILABLE/Yellow; else the untouched CFG-bits path. Yellow is
+  the app's existing "unknown" glow — the label carries the distinction.
+- Info card gains a diagnostic line (mV · errno · flags · sample #) when the
+  characteristic is present. Config writes and the re-apply cache untouched.
+- Scan Phase 1: results advertising the Relay service are dropped before
+  typing, logged once per address per scan as `BleScan skip <addr>
+  relay-service adv`. The four hardware filters are unchanged.
+- Both new UUIDs follow the existing `local.properties` → `BuildConfig`
+  pattern; they resolve to null when unset, so a missing key degrades to
+  "feature absent" instead of crashing on `UUID.fromString("")`.
 
 ### 2026-09-04 — Pull-to-scan
 - Pull the device list down and release to run the same action as Find Devices

@@ -30,6 +30,8 @@ android {
         buildConfigField("String", "BLE_CFG_CHAR_UUID",    "\"${localProps.getProperty("ble.cfg_char_uuid",     "")}\"")
         buildConfigField("String", "BLE_FW_CHAR_UUID",     "\"${localProps.getProperty("ble.fw_char_uuid",      "")}\"")
         buildConfigField("String", "BLE_SMP_SERVICE_UUID", "\"${localProps.getProperty("ble.smp_service_uuid",  "")}\"")
+        buildConfigField("String", "BLE_BATT_DIAG_CHAR_UUID", "\"${localProps.getProperty("ble.batt_diag_char_uuid", "")}\"")
+        buildConfigField("String", "BLE_RELAY_SERVICE_UUID",  "\"${localProps.getProperty("ble.relay_service_uuid",  "")}\"")
     }
 
     buildFeatures {

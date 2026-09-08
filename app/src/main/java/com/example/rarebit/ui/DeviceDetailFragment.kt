@@ -78,6 +78,8 @@ class DeviceDetailFragment : Fragment() {
         val delayValue: TextView = view.findViewById(R.id.delayValue)
         val delayLabel: View = view.findViewById(R.id.delayLabel)
         val delayRow: View = view.findViewById(R.id.delayRow)
+        val batteryDiagLabel: TextView = view.findViewById(R.id.batteryDiagLabel)
+        val batteryDiagValue: TextView = view.findViewById(R.id.batteryDiagValue)
         val infoCard: MaterialCardView = view.findViewById(R.id.infoCard)
         val infoChevron: ImageView = view.findViewById(R.id.infoChevron)
         val infoDetail: View = view.findViewById(R.id.infoDetail)
@@ -441,7 +443,12 @@ class DeviceDetailFragment : Fragment() {
                 titleCard.strokeColor = strokeColor
                 titleCard.strokeWidth = if (device.isConnected) 6 else 0
 
+                // A faulted or unreadable sense path outranks the CFG bits,
+                // which report LOW forever in that state.
+                val diag = device.batteryDiag
                 batteryValue.text = when {
+                    diag?.senseFault == true   -> "SENSE FAULT"
+                    diag?.readFailed == true   -> "UNAVAILABLE"
                     device.batteryLevel > 95   -> "FULL"
                     device.batteryLevel >= 0   -> "${device.batteryLevel}%"
                     device.configInterval == 0 -> "LOW"
@@ -449,6 +456,22 @@ class DeviceDetailFragment : Fragment() {
                     device.configInterval == 2 -> "HIGH"
                     device.configInterval == 3 -> "FULL"
                     else                       -> "--"
+                }
+
+                if (diag != null) {
+                    batteryDiagValue.text = buildString {
+                        append(if (diag.mv == -1) "read failed" else "${diag.mv} mV")
+                        append(" · errno ${diag.errno}")
+                        if (diag.docked) append(" · docked")
+                        if (diag.statHigh) append(" · STAT high")
+                        if (diag.senseFault) append(" · sense fault")
+                        append(" · #${diag.count}")
+                    }
+                    batteryDiagLabel.visibility = View.VISIBLE
+                    batteryDiagValue.visibility = View.VISIBLE
+                } else {
+                    batteryDiagLabel.visibility = View.GONE
+                    batteryDiagValue.visibility = View.GONE
                 }
                 firmwareValue.text = if (device.firmwareVersion.isNotEmpty())
                     "Firmware: ${device.firmwareVersion}" else "Firmware: --"
