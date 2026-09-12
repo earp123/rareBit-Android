@@ -107,6 +107,16 @@
 
 ## History
 
+### 2026-09-11 — Options menu: direct shop link replaces reseller sub-menu
+Per `docs/options-shop-link.md` (iOS mirrors it — same label and URL).
+
+- "Buy PRO Sets" sub-menu and its two third-party reseller links (The Top Ref,
+  RefsNeedLoveToo) removed; rareBit sells direct via Wix Stores now.
+- New top-level **Shop** item (id 4, fourth position) opens
+  `https://www.rarebitofficial.com/shop`. The menu is now flat, one popup, five
+  items: rareBit Official · User Manual · Smartwatch · Shop · Support.
+- Smartwatch remains a no-op, unchanged by this task.
+
 ### 2026-09-08 — Battery diagnostic + relay-service scan reject
 Both per task docs (`docs/battery-diagnostic.md`,
 `docs/scan-filter-consolidation.md`); iOS twins exist for each.

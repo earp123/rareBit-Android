@@ -99,10 +99,7 @@ class ScanListFragment : Fragment() {
                 add(0, 1, 0, "rareBit Official")
                 add(0, 2, 1, "User Manual")
                 add(0, 3, 2, "Smartwatch")
-                addSubMenu(0, 4, 3, "Buy PRO Sets").apply {
-                    add(0, 41, 0, "The Top Ref")
-                    add(0, 42, 1, "RefsNeedLoveToo")
-                }
+                add(0, 4, 3, "Shop")
                 add(0, 5, 4, "Support")
             }
             menu.setOnMenuItemClickListener { item ->
@@ -110,8 +107,7 @@ class ScanListFragment : Fragment() {
                     1  -> startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.rarebitofficial.com")))
                     2  -> startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.rarebitofficial.com/order")))
                     3  -> { /* coming soon */ }
-                    41 -> startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://thetopref.com/collections/beep-flags/products/rarebit-beep-flags")))
-                    42 -> startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://refsneedlovetoo.com/collections/referee-gear/products/next-generation-buzzer-flags-rarebit-pro-set")))
+                    4  -> startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.rarebitofficial.com/shop")))
                     5  -> startActivity(Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:reply@rarebit.biz")))
                 }
                 true
