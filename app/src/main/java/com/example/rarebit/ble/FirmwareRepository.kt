@@ -13,6 +13,19 @@ data class ReleaseInfo(
     val assetApiUrl: String  // GitHub API URL for the .bin asset
 )
 
+enum class RelayChannel { STABLE, DEVELOPMENT }
+
+// Relay firmware (legacy Nordic DFU). Resolved from the release's manifest.json.
+data class RelayReleaseInfo(
+    val version: String,      // "M.N" from fw_version_byte — same format as the FW char
+    val versionByte: String,  // e.g. "0x20"
+    val build: Int?,          // development builds only
+    val channel: RelayChannel,
+    val tag: String,
+    val zipUrl: String,       // stable: browser_download_url; dev: asset API url
+    val sha256: String        // manifest dfu_package_sha256, lowercase
+)
+
 object FirmwareRepository {
 
     private const val RELEASES_URL =
@@ -35,7 +48,7 @@ object FirmwareRepository {
     private val cache = mutableMapOf<DeviceType, ReleaseInfo>()
     private var relayCache: ReleaseInfo? = null
 
-    fun clearCache() { cache.clear(); relayCache = null }
+    fun clearCache() { cache.clear(); relayCache = null; relayStableCache = null }
 
     suspend fun fetchReleaseInfo(deviceType: DeviceType, pat: String): ReleaseInfo? =
         withContext(Dispatchers.IO) {
@@ -112,6 +125,124 @@ object FirmwareRepository {
         return null
     }
 
+    // ── Relay (legacy Nordic DFU) ─────────────────────────────────────────────
+    // The Relay never fetches from rareBit-Flags-Receivers. Stable builds come from
+    // the public releases repo (no auth); development builds from private
+    // rareBit-Relay (PAT). Both carry manifest.json.
+
+    private const val RELAY_STABLE_RELEASES_URL =
+        "https://api.github.com/repos/earp123/rareBit-firmware-releases/releases"
+    private const val RELAY_DEV_RELEASES_URL =
+        "https://api.github.com/repos/earp123/rareBit-Relay/releases"
+    private const val RELAY_STABLE_TAG_PREFIX = "relay-v"
+    private const val RELAY_DEV_TAG_PREFIX = "RELAY_"
+    const val RELAY_DEV_BRANCH = "main"
+
+    // Pin a stable Relay tag (e.g. "relay-v1.10") for testing; null = highest version.
+    private val RELAY_STABLE_EXACT_TAG: String? = null
+
+    private val DEV_BUILD_REGEX = Regex("""-dev\.(\d+)$""")
+
+    private var relayStableCache: RelayReleaseInfo? = null
+
+    suspend fun fetchRelayStable(): RelayReleaseInfo? = withContext(Dispatchers.IO) {
+        relayStableCache?.let { return@withContext it }
+        val releases = JSONArray(httpGet(RELAY_STABLE_RELEASES_URL, pat = null))
+        var best: JSONObject? = null
+        var bestVersion = ""
+        for (i in 0 until releases.length()) {
+            val r = releases.getJSONObject(i)
+            if (r.optBoolean("prerelease") || r.optBoolean("draft")) continue
+            val tag = r.getString("tag_name")
+            if (!tag.startsWith(RELAY_STABLE_TAG_PREFIX)) continue
+            val pinned = RELAY_STABLE_EXACT_TAG
+            if (pinned != null) {
+                if (tag == pinned) { best = r; break }
+                continue
+            }
+            val v = parseVersion(tag) ?: continue
+            // GitHub lists by date, not version — relay-v1.10 must beat relay-v1.9
+            if (best == null || isNewerVersion(v, bestVersion)) { best = r; bestVersion = v }
+        }
+        val release = best ?: return@withContext null
+        resolveRelayRelease(release, RelayChannel.STABLE, pat = null)?.also { relayStableCache = it }
+    }
+
+    // Never cached: dev builds churn, and the developer picked this on purpose.
+    suspend fun fetchRelayDev(pat: String): RelayReleaseInfo? = withContext(Dispatchers.IO) {
+        val releases = JSONArray(httpGet(RELAY_DEV_RELEASES_URL, pat))
+        var best: JSONObject? = null
+        var bestVersion = ""
+        var bestBuild = -1
+        for (i in 0 until releases.length()) {
+            val r = releases.getJSONObject(i)
+            if (!r.optBoolean("prerelease")) continue
+            if (r.optString("target_commitish") != RELAY_DEV_BRANCH) continue
+            val tag = r.getString("tag_name")
+            if (!tag.startsWith(RELAY_DEV_TAG_PREFIX)) continue
+            val v = parseVersion(tag) ?: continue
+            val build = DEV_BUILD_REGEX.find(tag)?.groupValues?.get(1)?.toIntOrNull() ?: continue
+            // Newest version stream first, then highest -dev.<n> within it
+            val sameVersion = !isNewerVersion(v, bestVersion) && !isNewerVersion(bestVersion, v)
+            if (best == null || isNewerVersion(v, bestVersion) || (sameVersion && build > bestBuild)) {
+                best = r; bestVersion = v; bestBuild = build
+            }
+        }
+        val release = best ?: return@withContext null
+        resolveRelayRelease(release, RelayChannel.DEVELOPMENT, pat)
+    }
+
+    suspend fun downloadRelayZip(info: RelayReleaseInfo, pat: String): ByteArray =
+        withContext(Dispatchers.IO) { downloadRelayAsset(info.zipUrl, info.channel, pat) }
+
+    private fun resolveRelayRelease(release: JSONObject, channel: RelayChannel, pat: String?): RelayReleaseInfo? {
+        val tag = release.getString("tag_name")
+        val assets = release.getJSONArray("assets")
+        fun asset(name: String): JSONObject? =
+            (0 until assets.length()).map { assets.getJSONObject(it) }
+                .firstOrNull { it.getString("name") == name }
+        fun urlOf(a: JSONObject): String =
+            if (channel == RelayChannel.STABLE) a.getString("browser_download_url") else a.getString("url")
+
+        val manifestAsset = asset("manifest.json")
+        if (manifestAsset == null) {
+            Log.w("FirmwareRepo", "relay $tag has no manifest.json")
+            return null
+        }
+        val manifest = JSONObject(String(downloadRelayAsset(urlOf(manifestAsset), channel, pat), Charsets.UTF_8))
+        if (manifest.optString("product") != "relay") {
+            Log.w("FirmwareRepo", "relay $tag manifest product=${manifest.optString("product")}")
+            return null
+        }
+        val byteStr = manifest.getString("fw_version_byte")
+        val b = byteStr.removePrefix("0x").removePrefix("0X").toInt(16)
+        val version = "${b shr 4}.${b and 0x0F}"
+        val packageName = manifest.getString("dfu_package")
+        val zip = asset(packageName)
+        if (zip == null) {
+            Log.w("FirmwareRepo", "relay $tag missing $packageName")
+            return null
+        }
+        val build = if (manifest.has("build")) manifest.getInt("build") else null
+        Log.d("FirmwareRepo", "relay $tag -> $byteStr build ${build ?: "-"}")
+        return RelayReleaseInfo(
+            version = version,
+            versionByte = byteStr,
+            build = build,
+            channel = channel,
+            tag = tag,
+            zipUrl = urlOf(zip),
+            sha256 = manifest.getString("dfu_package_sha256").lowercase()
+        )
+    }
+
+    private fun downloadRelayAsset(url: String, channel: RelayChannel, pat: String?): ByteArray =
+        if (channel == RelayChannel.DEVELOPMENT) {
+            downloadAsset(url, pat ?: "")  // asset API url + octet-stream + PAT; 302 → storage
+        } else {
+            httpGetBytes(url, pat = null, accept = "application/octet-stream")
+        }
+
     suspend fun downloadFirmware(assetApiUrl: String, pat: String): ByteArray =
         withContext(Dispatchers.IO) { downloadAsset(assetApiUrl, pat) }
 
@@ -130,6 +261,23 @@ object FirmwareRepository {
 
     private fun parseVersion(tagName: String): String? =
         Regex("""\d+\.\d+(?:\.\d+)?""").find(tagName)?.value
+
+    // Relay requests surface the HTTP status ("HTTP 404") rather than a bare
+    // FileNotFoundException, so a PAT without rareBit-Relay access says so.
+    private fun httpGetBytes(url: String, pat: String?, accept: String): ByteArray {
+        val conn = URL(url).openConnection() as HttpURLConnection
+        conn.connectTimeout = 15_000
+        conn.readTimeout = 30_000
+        pat?.let { conn.setRequestProperty("Authorization", "token $it") }
+        conn.setRequestProperty("Accept", accept)
+        conn.setRequestProperty("User-Agent", "rareBit-Android")
+        val code = conn.responseCode
+        if (code !in 200..299) throw java.io.IOException("HTTP $code")
+        return conn.inputStream.use { it.readBytes() }
+    }
+
+    private fun httpGet(url: String, pat: String?): String =
+        String(httpGetBytes(url, pat, "application/vnd.github+json"), Charsets.UTF_8)
 
     private fun githubGet(url: String, pat: String, accept: String): String {
         val conn = URL(url).openConnection() as HttpURLConnection
