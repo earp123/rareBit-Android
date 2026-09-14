@@ -350,7 +350,7 @@ class BleManager(context: Context) {
         }
     }
 
-    // CFG byte layout (iOS parity): bits7-6 battery, bits5-2 delay ×20ms,
+    // CFG byte layout (iOS parity): bits7-6 battery, bits5-2 delay ×30ms,
     // bit0 short-press enable
     private fun applyConfigByte(address: String, byte: Int) {
         android.util.Log.i("BleCfg", "CFG($address) = 0x%02X  shortPress=%b delay=%d batt=%d".format(
@@ -617,6 +617,10 @@ class BleManager(context: Context) {
         // Mirrors CFG_PERSIST_MASK in firmware config_svc.c.
         const val CFG_CLIENT_MASK = 0x3F
         const val CFG_BATTERY_MASK = 0xC0
+
+        // Raw CFG bits 5-2 (0-15) x this = short press delay in ms (0-450).
+        // Mirrors CFG_SHTPRS_DELAY_STEP_MS in firmware config_svc.h.
+        const val SHORT_PRESS_DELAY_STEP_MS = 30
 
         // Exact advertised names (match iOS RareBitDeviceType raw values)
         const val NAME_FLAG     = "rareBit PRO Flag"

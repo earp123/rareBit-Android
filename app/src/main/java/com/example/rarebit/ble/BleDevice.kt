@@ -54,7 +54,7 @@ data class BleDevice(
     val configInterval: Int = -1,
     val configByte: Int = -1,           // raw device-reported CFG byte (write base)
     val shortPressEnabled: Boolean = false,
-    val shortPressDelay: Int = -1,      // bits 5-2, ×20 ms (0-15); -1 = not read
+    val shortPressDelay: Int = -1,      // bits 5-2, ×30 ms (0-15); -1 = not read
     val isDfuOnly: Boolean = false,
     val batteryDiag: BatteryDiag? = null
 ) {

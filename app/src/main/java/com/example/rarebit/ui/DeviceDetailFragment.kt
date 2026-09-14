@@ -49,6 +49,18 @@ class DeviceDetailFragment : Fragment() {
         const val DEV_HOLD_MS = 10_000L
         const val DEV_BRANCH_LABEL = "development"
 
+        const val SHORT_PRESS_INFO_FLAG =
+            "When on, a press shorter than the Short Press Delay sends a short-press alert " +
+            "instead of the normal alert. When off, every press sends the normal alert. " +
+            "The referee only gets the short-press alert if the Receiver or Relay also has " +
+            "Short Press Alert on. A delay of 0 turns short presses off."
+
+        const val SHORT_PRESS_INFO_RECEIVER =
+            "When on, a short press from either Flag arrives as its own alert (Alert 3), the " +
+            "same whichever Flag pressed. When off, a short press arrives as that Flag's normal " +
+            "Flag 1 or Flag 2 alert. The Flag must also have Short Press Alert on for Alert 3 " +
+            "to reach the referee."
+
         // Relay dev builds come from rareBit-Relay's main branch
         fun devBranchLabel(type: DeviceType) =
             if (type == DeviceType.RELAY) FirmwareRepository.RELAY_DEV_BRANCH else DEV_BRANCH_LABEL
@@ -90,6 +102,7 @@ class DeviceDetailFragment : Fragment() {
         val delayValue: TextView = view.findViewById(R.id.delayValue)
         val delayLabel: View = view.findViewById(R.id.delayLabel)
         val delayRow: View = view.findViewById(R.id.delayRow)
+        val shortPressAlertInfo: TextView = view.findViewById(R.id.shortPressAlertInfo)
         val batteryDiagLabel: TextView = view.findViewById(R.id.batteryDiagLabel)
         val batteryDiagValue: TextView = view.findViewById(R.id.batteryDiagValue)
         val infoCard: MaterialCardView = view.findViewById(R.id.infoCard)
@@ -192,9 +205,9 @@ class DeviceDetailFragment : Fragment() {
             findNavController().navigateUp()
         }
 
-        // Slider is the raw GATT field (0-15); display converts to ms (×20)
+        // Slider is the raw GATT field (0-15); the label shows ms
         delaySlider.addOnChangeListener { _, value, _ ->
-            delayValue.text = "${value.toInt() * 20}"
+            delayValue.text = "${value.toInt() * BleManager.SHORT_PRESS_DELAY_STEP_MS}"
         }
         delaySlider.addOnSliderTouchListener(object : Slider.OnSliderTouchListener {
             override fun onStartTrackingTouch(slider: Slider) { userSliding = true }
@@ -578,6 +591,15 @@ class DeviceDetailFragment : Fragment() {
                 val showDelay = device.deviceType == DeviceType.FLAG
                 delayLabel.visibility = if (showDelay) View.VISIBLE else View.GONE
                 delayRow.visibility = if (showDelay) View.VISIBLE else View.GONE
+
+                // Bit 0 means something different on each end of the link
+                // (docs/short-press-alert.md)
+                when (device.deviceType) {
+                    DeviceType.FLAG -> shortPressAlertInfo.text = SHORT_PRESS_INFO_FLAG
+                    DeviceType.RECEIVER, DeviceType.RELAY ->
+                        shortPressAlertInfo.text = SHORT_PRESS_INFO_RECEIVER
+                    DeviceType.UNKNOWN -> Unit
+                }
 
                 // Update loading status text while still in loading state
                 if (!versionFetchStarted) {

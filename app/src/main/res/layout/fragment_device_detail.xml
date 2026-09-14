@@ -284,7 +284,7 @@
 
                     </LinearLayout>
 
-                    <!-- Slider row (Flag only) — raw GATT field 0-15, shown as ms ×20 -->
+                    <!-- Slider row (Flag only) — raw GATT field 0-15, shown as ms ×30 -->
                     <TextView
                         android:id="@+id/delayLabel"
                         android:layout_width="match_parent"
@@ -483,7 +483,8 @@
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:layout_marginBottom="12dp"
-                            android:text="With Short Press Alert enabled, button presses shorter than the Short Press Delay value can intentionally send a different, more brief alert type to the Referee. For the additional alert type to occur, both the Flag and Receiver must have Short Press enabled. A Short Press Delay value of 0 effectively disables Short Press Alert."
+                            android:id="@+id/shortPressAlertInfo"
+                            android:text="Controls short presses (a press shorter than the Short Press Delay). Both the Flag and the Receiver or Relay must have it on for the short-press alert to reach the referee."
                             android:textColor="#FFB0B0B0"
                             android:textSize="13sp"
                             android:lineSpacingMultiplier="1.4" />

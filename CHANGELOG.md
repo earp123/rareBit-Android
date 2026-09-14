@@ -38,6 +38,11 @@
 - Loading overlay ("Connecting…" → "Checking for updates…") before content reveals
 - Title card glow color + stroke driven by connection state and glow enum
 - Settings card: battery, firmware version, alert toggle, delay slider
+- Short press delay slider (Flag only): raw CFG field 0–15 × 30 ms (0–450 ms),
+  matching firmware `CFG_SHTPRS_DELAY_STEP_MS`
+- Short Press Alert explanation follows the connected device: Flag = send a
+  short press at all; Receiver / RXRLY / Relay = relay it as its own Alert 3
+  (off → the normal Flag 1 / Flag 2 alert)
 - Info card: expandable
 - DFU-only devices (SMP only, no config service): settings/info cards hidden, DFU card shown immediately
 
@@ -118,10 +123,29 @@
   name filters for CFG-UUID-only. **Gated** on firmware 2.0 in production *and*
   the fielded units updated — pre-2.0 units would otherwise become invisible
   and un-updatable
+- Drop the info card's "introduced in firmware 2.0" note once 2.0 is the
+  shipping stream (`docs/short-press-alert.md`)
 
 ---
 
 ## History
+
+### 2026-09-13 — Short Press Alert: delay unit + device-aware copy
+Per `docs/short-press-alert.md` (contract owner:
+`rareBit-Flags-Receivers/docs/short-press-alert.md`; the iOS twin carries the
+same two items).
+
+- **Delay unit correction:** the slider label is the raw field × 30 ms
+  (0–450 ms), not × 20. Firmware `CFG_SHTPRS_DELAY_STEP_MS = 30` is already on
+  `development`, so before this a slider at 10 read "200" while the Flag waited
+  300 ms. The CFG write path is unchanged; the step lives in
+  `BleManager.SHORT_PRESS_DELAY_STEP_MS`.
+- **Bit 0 meaning by device:** on a Flag it decides whether a short press is
+  sent at all. On a Receiver / RXRLY / Relay it relays a short press as its own
+  Alert 3 (the same alert whichever Flag pressed); off, the press arrives as the
+  normal Flag 1 / Flag 2 alert. Both ends must be on for Alert 3 to reach the
+  referee. The info card now explains whichever side is connected.
+- No BLE change: the toggle already showed for every device type.
 
 ### 2026-09-13 — Relay OTA DFU (legacy Nordic DFU), dev channel first
 Per `docs/relay-dfu-flow.md` (iOS twins: `relay-dfu-flow.md`,
