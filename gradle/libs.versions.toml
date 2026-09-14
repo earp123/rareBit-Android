@@ -14,6 +14,7 @@ lifecycle = "2.7.0"
 coroutines = "1.8.0"
 mcumgr = "2.7.4"
 swiperefreshlayout = "1.1.0"
+nordicDfu = "2.11.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -31,6 +32,7 @@ androidx-lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecyc
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
 mcumgr-ble = { group = "no.nordicsemi.android", name = "mcumgr-ble", version.ref = "mcumgr" }
 androidx-swiperefreshlayout = { group = "androidx.swiperefreshlayout", name = "swiperefreshlayout", version.ref = "swiperefreshlayout" }
+nordic-dfu = { group = "no.nordicsemi.android", name = "dfu", version.ref = "nordicDfu" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

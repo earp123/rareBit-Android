@@ -19,10 +19,12 @@ import androidx.navigation.fragment.findNavController
 import com.example.rarebit.BuildConfig
 import com.example.rarebit.MainActivity
 import com.example.rarebit.R
+import com.example.rarebit.ble.BleManager
 import com.example.rarebit.ble.DeviceType
 import com.example.rarebit.ble.DfuState
 import com.example.rarebit.ble.FirmwareRepository
 import com.example.rarebit.ble.GlowState
+import com.example.rarebit.ble.RelayReleaseInfo
 import com.example.rarebit.ble.ReleaseInfo
 import com.google.android.material.card.MaterialCardView
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
@@ -39,12 +41,17 @@ class DeviceDetailFragment : Fragment() {
     }
     private val bleManager get() = (requireActivity() as MainActivity).bleManager
     private val dfuManager get() = (requireActivity() as MainActivity).dfuManager
+    private val relayDfuManager get() = (requireActivity() as MainActivity).relayDfuManager
 
     private enum class ActiveDfu { NONE, RELAY, RESTORE }
 
     private companion object {
         const val DEV_HOLD_MS = 10_000L
         const val DEV_BRANCH_LABEL = "development"
+
+        // Relay dev builds come from rareBit-Relay's main branch
+        fun devBranchLabel(type: DeviceType) =
+            if (type == DeviceType.RELAY) FirmwareRepository.RELAY_DEV_BRANCH else DEV_BRANCH_LABEL
     }
 
     private var pendingRelease: ReleaseInfo? = null
@@ -54,6 +61,11 @@ class DeviceDetailFragment : Fragment() {
     private var deviceWasConnected = false
     private var dfuStartedByThisFragment = false
     private var userSliding = false
+
+    // Relay *device* firmware (legacy DFU). Not the Receiver → RXRLY cross-grade,
+    // which is relayCard / pendingRelayRelease / ActiveDfu.RELAY.
+    private var pendingRelayFw: RelayReleaseInfo? = null
+    private var relayFwSuccessHandled = false
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -130,14 +142,31 @@ class DeviceDetailFragment : Fragment() {
         devFetchButton.setOnClickListener {
             val device = bleManager.devices.value.firstOrNull { it.address == deviceAddress }
                 ?: return@setOnClickListener
-            devStatusText.text = "Fetching from '$DEV_BRANCH_LABEL'…"
+            val branch = devBranchLabel(device.deviceType)
+            devStatusText.text = "Fetching from '$branch'…"
             viewLifecycleOwner.lifecycleScope.launch {
                 try {
+                    if (device.deviceType == DeviceType.RELAY) {
+                        if (BleManager.DFU_TRIGGER_CHAR_UUID == null) {
+                            devStatusText.text = "Relay DFU trigger not configured"
+                            return@launch
+                        }
+                        val relayDev = FirmwareRepository.fetchRelayDev(BuildConfig.GITHUB_PAT)
+                        if (relayDev == null) {
+                            devStatusText.text = "No dev release on '$branch' yet"
+                        } else {
+                            pendingRelayFw = relayDev
+                            dfuButton.text = "Install build ${relayDev.build}"
+                            dfuCard.visibility = View.VISIBLE
+                            devStatusText.text = "Dev v${relayDev.version} (build ${relayDev.build}) armed"
+                        }
+                        return@launch
+                    }
                     val dev = FirmwareRepository.fetchDevReleaseInfo(
                         device.deviceType, BuildConfig.GITHUB_PAT
                     )
                     if (dev == null) {
-                        devStatusText.text = "No dev release on '$DEV_BRANCH_LABEL' yet"
+                        devStatusText.text = "No dev release on '$branch' yet"
                     } else {
                         pendingRelease = dev
                         dfuButton.text = "Install dev v${dev.version}"
@@ -154,6 +183,9 @@ class DeviceDetailFragment : Fragment() {
         // stale Success/Error value doesn't immediately trigger navigation in this fragment.
         dfuManager.state.value.let {
             if (it is DfuState.Success || it is DfuState.Error) dfuManager.cancel()
+        }
+        relayDfuManager.state.value.let {
+            if (it is DfuState.Success || it is DfuState.Error) relayDfuManager.cancel()
         }
 
         view.findViewById<ImageButton>(R.id.backButton).setOnClickListener {
@@ -253,6 +285,22 @@ class DeviceDetailFragment : Fragment() {
         dfuButton.setOnClickListener {
             val device = bleManager.devices.value.firstOrNull { it.address == deviceAddress }
                 ?: return@setOnClickListener
+            if (device.deviceType == DeviceType.RELAY) {
+                val fw = pendingRelayFw
+                if (fw == null) {
+                    dfuStatusText.text = "No Relay firmware — check network / PAT"
+                    return@setOnClickListener
+                }
+                MaterialAlertDialogBuilder(requireContext())
+                    .setTitle("Update Relay Firmware?")
+                    .setMessage("Keep the Relay docked. Do not unplug until it reboots.")
+                    .setNegativeButton("Cancel", null)
+                    .setPositiveButton("Continue") { _, _ ->
+                        relayDfuManager.start(deviceAddress, fw, BuildConfig.GITHUB_PAT)
+                    }
+                    .show()
+                return@setOnClickListener
+            }
             val release = pendingRelease
             if (release == null) {
                 dfuStatusText.text = "No firmware URL — check PAT / network"
@@ -397,6 +445,42 @@ class DeviceDetailFragment : Fragment() {
             }
         }
 
+        // Relay device firmware (legacy DFU) — drives the same generic DFU card
+        viewLifecycleOwner.lifecycleScope.launch {
+            combine(relayDfuManager.state, relayDfuManager.stage) { st, stage -> st to stage }
+                .collectLatest { (state, stage) ->
+                    when (state) {
+                        is DfuState.Idle -> Unit
+                        is DfuState.Downloading, is DfuState.Uploading -> {
+                            dfuStatusText.text = stage
+                            dfuProgress.visibility = View.VISIBLE
+                            dfuProgress.isIndeterminate = true
+                            dfuButton.isEnabled = false
+                        }
+                        is DfuState.Progress -> {
+                            dfuStatusText.text = "Flashing… ${state.percent}%"
+                            dfuProgress.visibility = View.VISIBLE
+                            dfuProgress.isIndeterminate = false
+                            dfuProgress.progress = state.percent
+                            dfuButton.isEnabled = false
+                        }
+                        is DfuState.Success -> {
+                            if (relayFwSuccessHandled) return@collectLatest
+                            relayFwSuccessHandled = true
+                            dfuStatusText.text = "Rebooting — reconnect to confirm"
+                            dfuButton.isEnabled = false
+                            bleManager.scheduleScan(5_000)
+                            if (isAdded) findNavController().navigateUp()
+                        }
+                        is DfuState.Error -> {
+                            dfuStatusText.text = "Error: ${state.message}"
+                            dfuProgress.visibility = View.GONE
+                            dfuButton.isEnabled = true
+                        }
+                    }
+                }
+        }
+
         // Observe device + services — drive loading state machine and keep UI current
         viewLifecycleOwner.lifecycleScope.launch {
             combine(bleManager.devices, bleManager.gattServicesMap) { devices, servicesMap ->
@@ -405,6 +489,10 @@ class DeviceDetailFragment : Fragment() {
                 if (device?.isConnected == true) deviceWasConnected = true
 
                 if (deviceWasConnected && (device == null || !device.isConnected)) {
+                    // The Relay DFU trigger reboots the device on purpose: stay on
+                    // screen (the flash is still running) and keep the main scan off
+                    // so it doesn't compete with the bootloader scan.
+                    if (relayDfuManager.isActive) return@collectLatest
                     bleManager.startScan()
                     if (isAdded) findNavController().navigateUp()
                     return@collectLatest
@@ -512,21 +600,34 @@ class DeviceDetailFragment : Fragment() {
                         loadingStatusText.text = "Checking for updates…"
                         launch {
                             var release: ReleaseInfo? = null
+                            var relayFw: RelayReleaseInfo? = null
+                            // Relay: offered only when this firmware exposes the DFU trigger
+                            val relayDfuCapable = device.deviceType == DeviceType.RELAY &&
+                                BleManager.DFU_TRIGGER_CHAR_UUID != null &&
+                                services.any { svc ->
+                                    svc.characteristics.any { it.uuid == BleManager.DFU_TRIGGER_CHAR_UUID }
+                                }
                             try {
-                                release = FirmwareRepository.fetchReleaseInfo(
-                                    device.deviceType, BuildConfig.GITHUB_PAT
-                                )
+                                if (relayDfuCapable) {
+                                    relayFw = FirmwareRepository.fetchRelayStable()
+                                } else {
+                                    release = FirmwareRepository.fetchReleaseInfo(
+                                        device.deviceType, BuildConfig.GITHUB_PAT
+                                    )
+                                }
                             } catch (e: Exception) {
                                 android.util.Log.w("DeviceDetail", "Release fetch failed", e)
                             }
                             pendingRelease = release
+                            pendingRelayFw = relayFw
+                            val offeredVersion = release?.version ?: relayFw?.version
 
                             // Device is the source of truth: compare the release against
                             // the FW-version characteristic (iOS parity). Unreadable FWV
                             // on an updatable device type = old firmware, offer recovery.
-                            val hasUpdate = release != null &&
+                            val hasUpdate = offeredVersion != null &&
                                 (device.firmwareVersion.isEmpty() ||
-                                 FirmwareRepository.isNewerVersion(release.version, device.firmwareVersion))
+                                 FirmwareRepository.isNewerVersion(offeredVersion, device.firmwareVersion))
                             bleManager.setHasUpdate(device.address, hasUpdate)
 
                             val showDfu = device.isDfuOnly || hasUpdate
@@ -537,9 +638,9 @@ class DeviceDetailFragment : Fragment() {
                             infoCard.visibility = configVis
 
                             dfuButton.text = when {
-                                device.isDfuOnly -> "Install Firmware"
-                                release != null  -> "Update to v${release.version}"
-                                else             -> "Update Firmware"
+                                device.isDfuOnly       -> "Install Firmware"
+                                offeredVersion != null -> "Update to v$offeredVersion"
+                                else                   -> "Update Firmware"
                             }
 
                             // Relay card: RECEIVER with firmware < 10.x → flash RX_RLY

@@ -32,6 +32,7 @@ android {
         buildConfigField("String", "BLE_SMP_SERVICE_UUID", "\"${localProps.getProperty("ble.smp_service_uuid",  "")}\"")
         buildConfigField("String", "BLE_BATT_DIAG_CHAR_UUID", "\"${localProps.getProperty("ble.batt_diag_char_uuid", "")}\"")
         buildConfigField("String", "BLE_RELAY_SERVICE_UUID",  "\"${localProps.getProperty("ble.relay_service_uuid",  "")}\"")
+        buildConfigField("String", "BLE_DFU_TRIGGER_CHAR_UUID", "\"${localProps.getProperty("ble.dfu_trigger_char_uuid", "")}\"")
     }
 
     buildFeatures {
@@ -76,6 +77,7 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.androidx.swiperefreshlayout)
     implementation(libs.mcumgr.ble)
+    implementation(libs.nordic.dfu)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

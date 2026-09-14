@@ -1,0 +1,22 @@
+# Copy to local.properties (gitignored) and fill in. sdk.dir is written by Android Studio.
+
+# GitHub fine-grained PAT with Contents: read on
+#   earp123/rareBit-Flags-Receivers  (Flag / Receiver firmware)
+#   earp123/rareBit-Relay            (Relay development builds)
+# Relay stable builds come from the public rareBit-firmware-releases repo (no auth).
+github.pat=
+
+# BLE UUIDs. batt_diag / relay_service / dfu_trigger are optional: unset means
+# "feature absent", not a crash.
+ble.cfg_service_uuid=23220001-38d5-4b7b-bad0-7dee1eee1b6d
+ble.cfg_char_uuid=23220002-38d5-4b7b-bad0-7dee1eee1b6d
+ble.fw_char_uuid=23220003-38d5-4b7b-bad0-7dee1eee1b6d
+ble.smp_service_uuid=8D53DC1D-1DB7-4CD3-868B-8A527460AA84
+ble.batt_diag_char_uuid=23220005-38d5-4b7b-bad0-7dee1eee1b6d
+ble.relay_service_uuid=33210001-28d5-4b7b-bad0-7dee1eee1b6d
+ble.dfu_trigger_char_uuid=23220004-38d5-4b7b-bad0-7dee1eee1b6d
+
+# Release signing (release builds only)
+keystore.store.password=
+keystore.key.alias=rarebit
+keystore.key.password=

@@ -54,11 +54,26 @@
 - Update detection compares the release version against the device's FW-version
   characteristic (device is the source of truth; unreadable FWV = offer update)
 - RELAY / UNKNOWN device types never fetch SMP firmware (no FLAG fallback —
-  the Relay's legacy Nordic DFU flow is a separate, pending workstream)
+  the Relay has its own legacy Nordic DFU flow, below)
 - MCUManager `CONFIRM_ONLY` upgrade mode (iOS parity; no revert-if-unconfirmed)
 - DFU progress: Downloading → Uploading → Progress % → Success / Error
 - Relay-flash and restore buttons confirm via dialog before flashing
 - On success: clears the device's update flag, navigates back to scan list
+- **Relay — legacy Nordic DFU** (`no.nordicsemi.android:dfu` 2.11.0), separate
+  from SMP: `RelayDfuManager` downloads the release's `dfu_package`, verifies it
+  against `manifest.json` `dfu_package_sha256`, writes `0xA8` to the DFU trigger
+  char (`23220004-…`, docked only; ATT `0x03` → "Dock the Relay on USB power"),
+  treats the disconnect as success, scans for the bootloader by service
+  `00001530-…` (never name/address; 15 s timeout), then flashes the zip unchanged
+  via `RelayDfuService` (PRN on, no notification). Offered only when the
+  connected Relay exposes the trigger char.
+
+  | | Stable | Development (hidden dev card) |
+  |---|---|---|
+  | Repo | `rareBit-firmware-releases` (public, no auth) | `rareBit-Relay` (private, PAT) |
+  | Select | `relay-v*`, not prerelease, highest version | prerelease, `target_commitish == main`, `RELAY_*`, highest version then `-dev.<n>` |
+  | Download | `browser_download_url` | asset API `url` + octet-stream + PAT |
+  | Version gate | manifest `fw_version_byte` > device FWV | none — build number shown |
 
 **Config re-apply (safety net)**
 - Confirmed user CFG writes cache bits 0–5 per device address; on connect, if
@@ -91,9 +106,10 @@
 
 ### Pending
 
-- Relay legacy Nordic DFU flow (trigger `0xA8`, bootloader service `1530`,
-  manifest + SHA-256 from public releases repo, recovery card) — see parity
-  audit P3
+- Relay DFU Phase 2 (`docs/relay-dfu-flow.md`): bootloader-mode recovery card
+  (an interrupted flash leaves the Relay advertising `1530` on every boot) and
+  post-flash auto-reconnect + FWV == manifest byte confirmation (P4 wants the
+  same for SMP)
 - No retry if GitHub fetch fails mid-session (requires navigating away and back)
 - "No firmware URL" error shown in DFU status text if fetch failed — informational only, no retry button
 - No connect watchdog / BT-off handling; no post-DFU reconnect + version
@@ -106,6 +122,34 @@
 ---
 
 ## History
+
+### 2026-09-13 — Relay OTA DFU (legacy Nordic DFU), dev channel first
+Per `docs/relay-dfu-flow.md` (iOS twins: `relay-dfu-flow.md`,
+`relay-dev-channel.md`). Phase 1 of parity audit P3.
+
+- New `RelayDfuManager` (own coroutine scope, survives the detail screen) and
+  `RelayDfuService` on the Nordic DFU library: download → SHA-256 → trigger
+  `0xA8` → await disconnect → `1530` scan → flash → "Rebooting — reconnect to
+  confirm" and back to the scan list. Reuses `DfuState`; step text travels as a
+  separate flow so the SMP observer is untouched.
+- `FirmwareRepository.fetchRelayStable()` (session-cached, unauthenticated) and
+  `fetchRelayDev(pat)` (uncached) resolve `manifest.json`. `fw_version_byte`
+  `0xMN` → "M.N", the same string the FW characteristic produces, so
+  `isNewerVersion` works unchanged. Relay requests surface the HTTP status
+  ("HTTP 404"), so a PAT without `rareBit-Relay` access says so.
+  `RELAY_STABLE_EXACT_TAG` (null = highest) pins a stable tag for testing.
+- Detail page, Relay only: the generic DFU card offers stable updates; the dev
+  card's *Fetch dev* arms the newest `main` build ("Dev v2.0 (build 1) armed",
+  button "Install build 1"). Both confirm "Keep the Relay docked. Do not unplug
+  until it reboots." While the flash runs, the trigger's intentional disconnect
+  no longer bounces the screen or restarts the main scan.
+- `BleManager.writeDfuTrigger()` returns the ATT status (a disconnect before the
+  write callback counts as success, per the contract);
+  `scanForLegacyDfuBootloader()` scans by service. New optional key
+  `ble.dfu_trigger_char_uuid` (unset → Relay DFU absent). Added
+  `local.properties.example` listing every key.
+- Receiver → RXRLY cross-grade (`relayCard` / `pendingRelayRelease`) and the SMP
+  flow are untouched.
 
 ### 2026-09-11 — Options menu: direct shop link replaces reseller sub-menu
 Per `docs/options-shop-link.md` (iOS mirrors it — same label and URL).

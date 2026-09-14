@@ -5,11 +5,13 @@ import android.view.WindowManager
 import androidx.appcompat.app.AppCompatActivity
 import com.example.rarebit.ble.BleManager
 import com.example.rarebit.ble.DfuManager
+import com.example.rarebit.ble.RelayDfuManager
 
 class MainActivity : AppCompatActivity() {
 
     val bleManager: BleManager by lazy { BleManager(this) }
     val dfuManager: DfuManager by lazy { DfuManager(this) }
+    val relayDfuManager: RelayDfuManager by lazy { RelayDfuManager(this, bleManager) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

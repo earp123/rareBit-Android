@@ -8,6 +8,7 @@ import android.os.ParcelUuid
 import android.os.Handler
 import android.os.Looper
 import androidx.annotation.RequiresApi
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -16,8 +17,10 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import com.example.rarebit.BuildConfig
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
 data class GattServiceItem(
     val uuid: UUID,
@@ -274,6 +277,9 @@ class BleManager(context: Context) {
             if (ok && characteristic.uuid == CFG_CHAR_UUID) {
                 cacheConfirmedWrite(gatt.device.address)
             }
+            if (characteristic.uuid == DFU_TRIGGER_CHAR_UUID) {
+                pendingTriggerWrites.remove(gatt.device.address)?.complete(status)
+            }
         }
     }
 
@@ -281,6 +287,9 @@ class BleManager(context: Context) {
         val address = gatt.device.address
         readQueues.remove(address)
         cfgNotifySubscribed.remove(address)
+        // The trigger reboots the Relay ~500 ms after the write response. If the
+        // link drops before that callback lands, the disconnect is the success signal.
+        pendingTriggerWrites.remove(address)?.complete(0)
         gatt.close()
         activeGatts.remove(address)
         mainHandler.post {
@@ -425,6 +434,58 @@ class BleManager(context: Context) {
         android.util.Log.i("BleCfg", "reapply $address 0x%02X -> 0x%02X".format(current, restored))
         applyConfigByte(address, restored)
         writeCharacteristic(address, CFG_SERVICE_UUID, CFG_CHAR_UUID, byteArrayOf(restored.toByte()))
+    }
+
+    // ── RELAY DFU ─────────────────────────────────────────────────────────────
+
+    private val pendingTriggerWrites = ConcurrentHashMap<String, CompletableDeferred<Int>>()
+
+    /**
+     * Writes 0xA8 to the Relay's DFU trigger characteristic (USB-docked only).
+     * @return the ATT status — 0 accepted (the coming disconnect is the success
+     *   signal), [TRIGGER_NO_RESPONSE] on timeout — or null when this link has no
+     *   trigger characteristic.
+     */
+    suspend fun writeDfuTrigger(address: String): Int? {
+        val uuid = DFU_TRIGGER_CHAR_UUID ?: return null
+        val gatt = activeGatts[address] ?: return null
+        gatt.getService(CFG_SERVICE_UUID)?.getCharacteristic(uuid) ?: return null
+        val result = CompletableDeferred<Int>()
+        pendingTriggerWrites[address] = result
+        writeCharacteristic(address, CFG_SERVICE_UUID, uuid, byteArrayOf(DFU_TRIGGER_MAGIC))
+        val status = withTimeoutOrNull(TRIGGER_WRITE_TIMEOUT_MS) { result.await() }
+        pendingTriggerWrites.remove(address)
+        return status ?: TRIGGER_NO_RESPONSE
+    }
+
+    /**
+     * Scans for the first Nordic legacy DFU (1530) advertiser — the Relay's
+     * bootloader. Matched by service only: OTAFIX advertises a board-specific
+     * name and may use a different address.
+     * @return the bootloader's address, or null on timeout.
+     */
+    suspend fun scanForLegacyDfuBootloader(timeoutMs: Long): String? {
+        val s = scanner ?: return null
+        stopScan()
+        val found = CompletableDeferred<String>()
+        val cb = object : ScanCallback() {
+            override fun onScanResult(callbackType: Int, result: ScanResult) {
+                found.complete(result.device.address)
+            }
+            override fun onScanFailed(errorCode: Int) {
+                android.util.Log.w("RelayDfu", "bootloader scan failed: $errorCode")
+            }
+        }
+        val filters = listOf(
+            ScanFilter.Builder().setServiceUuid(ParcelUuid(LEGACY_DFU_SERVICE_UUID)).build()
+        )
+        val settings = ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build()
+        s.startScan(filters, settings, cb)
+        return try {
+            withTimeoutOrNull(timeoutMs) { found.await() }
+        } finally {
+            s.stopScan(cb)
+        }
     }
 
     fun connect(device: BleDevice) {
@@ -580,6 +641,17 @@ class BleManager(context: Context) {
         // Watch-facing Relay service. Phones must never connect to it.
         val RELAY_SERVICE_UUID: UUID? = optionalUuid(BuildConfig.BLE_RELAY_SERVICE_UUID)
 
+        // Relay DFU trigger (config service, USB-docked only). Null when unset —
+        // the Relay DFU card is simply absent.
+        val DFU_TRIGGER_CHAR_UUID: UUID? = optionalUuid(BuildConfig.BLE_DFU_TRIGGER_CHAR_UUID)
+        val DFU_TRIGGER_MAGIC: Byte = 0xA8.toByte()
+        const val TRIGGER_WRITE_TIMEOUT_MS = 5_000L
+        const val TRIGGER_NO_RESPONSE = -1
+
+        // Nordic legacy DFU service advertised by the Relay's OTAFIX bootloader
+        // (public Nordic UUID).
+        val LEGACY_DFU_SERVICE_UUID: UUID = UUID.fromString("00001530-1212-EFDE-1523-785FEABCD123")
+
         private fun optionalUuid(value: String): UUID? =
             value.takeIf { it.isNotBlank() }?.let { runCatching { UUID.fromString(it) }.getOrNull() }
 
@@ -606,7 +678,8 @@ class BleManager(context: Context) {
             "00002a28-0000-1000-8000-00805f9b34fb" to "Software Revision",
             BuildConfig.BLE_CFG_CHAR_UUID.lowercase() to "Config",
             BuildConfig.BLE_FW_CHAR_UUID.lowercase() to "Firmware Version",
-            BuildConfig.BLE_BATT_DIAG_CHAR_UUID.lowercase() to "Battery Diagnostic"
+            BuildConfig.BLE_BATT_DIAG_CHAR_UUID.lowercase() to "Battery Diagnostic",
+            BuildConfig.BLE_DFU_TRIGGER_CHAR_UUID.lowercase() to "DFU Trigger"
         )
 
         fun knownServiceName(uuid: UUID): String =
