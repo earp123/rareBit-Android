@@ -150,6 +150,7 @@ Per `docs/relay-dfu-flow.md` (iOS twins: `relay-dfu-flow.md`,
   `local.properties.example` listing every key.
 - Receiver → RXRLY cross-grade (`relayCard` / `pendingRelayRelease`) and the SMP
   flow are untouched.
+- Bench-validated: dev build flashed end to end on a docked OTAFIX Relay.
 
 ### 2026-09-11 — Options menu: direct shop link replaces reseller sub-menu
 Per `docs/options-shop-link.md` (iOS mirrors it — same label and URL).
