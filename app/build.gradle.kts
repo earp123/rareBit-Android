@@ -18,7 +18,8 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.rarebit"
+        // Must match the Play Console app record exactly; permanent once a bundle is uploaded.
+        applicationId = "com.rarebitofficial.android"
         minSdk = 26
         targetSdk = 36
         versionCode = 1
