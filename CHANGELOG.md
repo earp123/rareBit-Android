@@ -107,10 +107,19 @@
 - Signal range: -75 dBm = empty → -15 dBm = full; animates on each scan update
 - 21sp device name
 
+**Release / Play Store**
+- `applicationId` is `com.rarebitofficial.android` (matches the Play Console app
+  record; permanent). `namespace` / Kotlin package remain `com.example.rarebit`.
+- Release signing via `rarebit-release.jks` (upload key) + `keystore.*` in
+  `local.properties`; `./gradlew bundleRelease` produces the AAB. See
+  `docs/play-store-release.md`.
+
 ---
 
 ### Pending
 
+- Play Store: closed test (12 testers × 14 days) must complete before
+  production access (`docs/play-store-release.md`)
 - Relay DFU Phase 2 (`docs/relay-dfu-flow.md`): bootloader-mode recovery card
   (an interrupted flash leaves the Relay advertising `1530` on every boot) and
   post-flash auto-reconnect + FWV == manifest byte confirmation (P4 wants the
@@ -129,6 +138,14 @@
 ---
 
 ## History
+
+### 2026-10-26 — Play Store release prep
+Per `docs/play-store-release.md`.
+
+- `applicationId` `com.example.rarebit` → `com.rarebitofficial.android`. Play
+  rejects `com.example.*`, and the Play Console app record was already created
+  under the new name. Namespace and source packages untouched.
+- No functional change; `versionCode 1` / `versionName 1.0` for the first upload.
 
 ### 2026-09-13 — Short Press Alert: delay unit + device-aware copy
 Per `docs/short-press-alert.md` (contract owner:
